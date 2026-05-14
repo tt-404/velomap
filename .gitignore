@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Datenbank & Daten
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+data/
+
+# Docker-Volumes (wenn lokal gemountet)
+volumes/
+
+# Logs
+*.log
+
+# Umgebungsvariablen (enthält Secrets)
+.env
+
+# Claude Code lokale Einstellungen
+.claude/

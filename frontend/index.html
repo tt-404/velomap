@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Velo-Zürich Monitor</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter+Tight:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f7f5f0;
+    --panel: #ffffff;
+    --panel-2: #f0ede5;
+    --text: #1a1c20;
+    --text-2: #3d4148;
+    --muted: #7d8290;
+    --accent: #d94a1f;
+    --accent-2: #f4a82c;
+    --good: #2a8c5a;
+    --rain: #2563eb;
+    --border: #e4e0d7;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; width: 100%;
+    font-family: 'Inter Tight', system-ui, sans-serif;
+    background: var(--bg); color: var(--text);
+    overflow: hidden; -webkit-text-size-adjust: 100%;
+  }
+  html, body { height: 100%; }
+  body { height: 100dvh; }
+  #app { display: flex; flex-direction: column; height: 100%; width: 100%; }
+
+  header {
+    flex: 0 0 auto;
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 10px 14px;
+    padding-top: max(10px, env(safe-area-inset-top));
+    background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  header h1 {
+    margin: 0; font-size: 15px; font-weight: 700; letter-spacing: -0.02em;
+    display: flex; align-items: center; gap: 8px;
+  }
+  header .stats {
+    display: flex; gap: 12px; align-items: center;
+    font-size: 11px; color: var(--muted); flex-wrap: wrap;
+  }
+  header .stats strong { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 600; }
+  .dot-live {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--good);
+    box-shadow: 0 0 0 3px rgba(42,140,90,0.18); animation: pulse 1.6s infinite;
+    display: inline-block; margin-right: 4px;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+  #map-wrap { flex: 1 1 auto; position: relative; min-height: 0; width: 100%; }
+  #map { position: absolute; inset: 0; background: var(--bg); }
+
+  #timeline {
+    flex: 0 0 auto;
+    background: var(--panel);
+    padding: 10px 14px;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border);
+  }
+  .controls { display: flex; gap: 6px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+  .controls button {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    padding: 8px 10px; border-radius: 8px; cursor: pointer;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 500;
+    touch-action: manipulation; -webkit-appearance: none;
+    transition: all 0.12s;
+  }
+  .controls button:hover { border-color: var(--accent); color: var(--accent); }
+  .controls button:active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .controls button.primary {
+    background: var(--accent); color: #fff; border-color: var(--accent);
+    font-weight: 700; padding: 8px 14px;
+  }
+  .controls .time {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    padding: 7px 10px; background: var(--panel-2);
+    border-radius: 8px; border: 1px solid var(--border);
+    flex: 1 1 100%; text-align: center; order: -1; color: var(--text-2);
+  }
+
+  .slider-wrap { position: relative; padding-top: 4px; }
+  input[type="range"] {
+    width: 100%; accent-color: var(--accent); cursor: pointer; height: 22px;
+    -webkit-appearance: none; background: transparent;
+    touch-action: pan-y;
+  }
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 6px; background: var(--border); border-radius: 3px;
+  }
+  input[type="range"]::-moz-range-track {
+    height: 6px; background: var(--border); border-radius: 3px;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--accent); border: 2px solid #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+    margin-top: -8px; cursor: pointer;
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--accent); border: 2px solid #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.2); cursor: pointer;
+  }
+
+  /* === Tooltips (Hover-Labels) === */
+  .station-tooltip {
+    background: var(--panel) !important;
+    border: 1px solid var(--border) !important;
+    color: var(--text) !important;
+    font-weight: 600; font-size: 12px;
+    padding: 4px 10px !important;
+    border-radius: 6px !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
+  }
+  .station-tooltip::before { border-top-color: var(--border) !important; }
+
+  /* === Popups mit Street View === */
+  .leaflet-popup-content-wrapper {
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+    padding: 0; overflow: hidden;
+  }
+  .leaflet-popup-tip { background: var(--panel); }
+  .leaflet-popup-content { margin: 0; font-size: 13px; line-height: 1.5; min-width: 260px; }
+  .popup-header {
+    padding: 12px 14px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .popup-header .title { font-size: 14px; font-weight: 700; margin: 0 0 2px; }
+  .popup-header .id { font-size: 10px; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+  .popup-body { padding: 10px 14px; }
+  .popup-body .big {
+    font-family: 'JetBrains Mono', monospace; font-size: 22px; font-weight: 600;
+    display: block; margin-top: 2px;
+  }
+  .popup-body .precip { margin-top: 6px; color: var(--rain); font-size: 12px; }
+  .popup-body .ts { color: var(--muted); font-size: 11px; margin-top: 4px;
+                     font-family: 'JetBrains Mono', monospace; }
+  .popup-streetview {
+    width: 100%; height: 160px;
+    background: var(--panel-2); border-top: 1px solid var(--border);
+    position: relative; overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .popup-streetview img {
+    width: 100%; height: 100%; object-fit: cover;
+    transition: opacity 0.3s;
+  }
+  .popup-streetview .sv-placeholder {
+    font-size: 11px; color: var(--muted); text-align: center; padding: 12px;
+  }
+  .popup-streetview .sv-link {
+    position: absolute; bottom: 6px; right: 6px;
+    background: rgba(255,255,255,0.95); padding: 3px 8px;
+    border-radius: 4px; font-size: 10px; font-weight: 600;
+    color: var(--text); text-decoration: none;
+    border: 1px solid var(--border);
+  }
+  .popup-streetview .sv-link:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  /* === Map Controls === */
+  .legend, .layer-toggle {
+    background: rgba(255, 255, 255, 0.95);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+    font-size: 10px; color: var(--text);
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+  }
+  .legend strong, .layer-toggle strong {
+    display: block; margin-bottom: 4px; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--muted); font-size: 9px; font-weight: 600;
+  }
+  .legend .row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+  .legend .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .layer-toggle label {
+    display: flex; align-items: center; gap: 8px;
+    cursor: pointer; padding: 3px 0; font-size: 11px;
+  }
+  .layer-toggle input[type="checkbox"] {
+    width: 16px; height: 16px; accent-color: var(--rain); cursor: pointer;
+  }
+  .layer-toggle .rain-icon {
+    display: inline-block; width: 14px; height: 14px; border-radius: 50%;
+    background: linear-gradient(135deg, #93c5fd 0%, #2563eb 100%);
+  }
+  .leaflet-control-attribution {
+    background: rgba(255,255,255,0.9) !important; color: var(--muted) !important;
+    font-size: 9px !important;
+  }
+  .leaflet-control-attribution a { color: var(--accent) !important; }
+
+  @media (min-width: 700px) {
+    header { flex-direction: row; align-items: center; justify-content: space-between; padding: 14px 24px; }
+    header h1 { font-size: 17px; }
+    header .stats { font-size: 12px; gap: 18px; }
+    #timeline { padding: 16px 24px 20px; }
+    .controls .time { flex: 0 0 auto; order: 0; min-width: 240px; font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>🚴 Velo-Zürich Monitor</h1>
+    <div class="stats">
+      <span><span class="dot-live"></span><span id="status">Lade…</span></span>
+    </div>
+  </header>
+  <div id="map-wrap">
+    <div id="map"></div>
+  </div>
+  <div id="timeline">
+    <div class="controls">
+      <span class="time" id="currentTime">–</span>
+      <button id="play" class="primary">▶</button>
+      <button data-step="-96">−1d</button>
+      <button data-step="-4">−1h</button>
+      <button data-step="-1">−15m</button>
+      <button data-step="1">+15m</button>
+      <button data-step="4">+1h</button>
+      <button data-step="96">+1d</button>
+    </div>
+    <div class="slider-wrap">
+      <input type="range" id="slider" min="0" max="671" step="1" value="671">
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function() {
+  'use strict';
+
+  var API = '';
+  var MAPILLARY_TOKEN = '';  // Wird vom Backend gefüllt
+  var stations = [];
+  var stationsById = {};
+  var stationMarkers = {};
+  var snapshotsCache = new Map();
+  var timeSlots = [];
+  var currentIdx = 0;
+  var playing = false;
+  var playTimer = null;
+  var streetViewCache = new Map();  // station_id -> image_url (oder null)
+
+  function colorFor(total) {
+    if (total >= 100) return '#dc2626';
+    if (total >= 40)  return '#d94a1f';
+    if (total >= 10)  return '#f4a82c';
+    return '#2a8c5a';
+  }
+  function radiusFor(total) {
+    return 7 + Math.sqrt(total) * 1.6;
+  }
+
+  // === Mapillary Street-View-Lookup ===
+  function mapillaryViewerUrl(lat, lon) {
+    // Öffnet Mapillary-Webviewer direkt am Punkt
+    return 'https://www.mapillary.com/app/?lat=' + lat + '&lng=' + lon + '&z=18&focus=photo';
+  }
+
+  function fetchStreetViewImage(stationId, lat, lon) {
+    if (streetViewCache.has(stationId)) return Promise.resolve(streetViewCache.get(stationId));
+    if (!MAPILLARY_TOKEN) {
+      streetViewCache.set(stationId, null);
+      return Promise.resolve(null);
+    }
+    // Suche das nächstgelegene Bild im 50m-Radius
+    var delta = 0.0006;  // ca. 50m
+    var bbox = (lon - delta) + ',' + (lat - delta) + ',' + (lon + delta) + ',' + (lat + delta);
+    var url = 'https://graph.mapillary.com/images' +
+      '?access_token=' + MAPILLARY_TOKEN +
+      '&bbox=' + bbox +
+      '&fields=id,thumb_1024_url,captured_at,geometry' +
+      '&limit=5';
+    return fetch(url)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data.data || !data.data.length) {
+          streetViewCache.set(stationId, null);
+          return null;
+        }
+        // Wähle das Bild, das am nächsten zur Station ist
+        var best = null;
+        var bestDist = Infinity;
+        for (var i = 0; i < data.data.length; i++) {
+          var img = data.data[i];
+          if (!img.geometry || !img.geometry.coordinates) continue;
+          var imgLon = img.geometry.coordinates[0];
+          var imgLat = img.geometry.coordinates[1];
+          var dx = (imgLon - lon) * 111000 * Math.cos(lat * Math.PI / 180);
+          var dy = (imgLat - lat) * 111000;
+          var dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < bestDist) {
+            bestDist = dist;
+            best = img;
+          }
+        }
+        var imageUrl = best ? best.thumb_1024_url : null;
+        streetViewCache.set(stationId, imageUrl);
+        return imageUrl;
+      })
+      .catch(function(e) {
+        console.warn('Mapillary-Fetch fehlgeschlagen:', e);
+        streetViewCache.set(stationId, null);
+        return null;
+      });
+  }
+
+  function buildPopupHtml(station, value, precip, ts, streetViewUrl) {
+    var col = colorFor(value);
+    var sv;
+    if (streetViewUrl) {
+      sv = '<div class="popup-streetview">' +
+             '<img src="' + streetViewUrl + '" alt="Street View">' +
+             '<a class="sv-link" href="' + mapillaryViewerUrl(station.lat, station.lon) + '" ' +
+                'target="_blank" rel="noopener">Mapillary öffnen ↗</a>' +
+           '</div>';
+    } else {
+      sv = '<div class="popup-streetview">' +
+             '<div class="sv-placeholder">' +
+               '📷 Kein Mapillary-Bild gefunden<br>' +
+               '<a class="sv-link" href="' + mapillaryViewerUrl(station.lat, station.lon) + '" ' +
+                  'target="_blank" rel="noopener" style="position:static;margin-top:6px;display:inline-block;">' +
+                 'In Mapillary öffnen ↗' +
+               '</a>' +
+             '</div>' +
+           '</div>';
+    }
+    var precipHtml = precip > 0 ? '<div class="precip">☔ ' + precip.toFixed(1) + ' mm/h</div>' : '';
+    return '<div class="popup-header">' +
+             '<div class="title">' + (station.name || 'Station ' + station.id) + '</div>' +
+             '<div class="id">ID ' + station.id +
+                (station.abkuerzung ? ' · ' + station.abkuerzung : '') + '</div>' +
+           '</div>' +
+           '<div class="popup-body">' +
+             '<div>Velos / 15 Min</div>' +
+             '<span class="big" style="color:' + col + '">' + value + '</span>' +
+             precipHtml +
+             '<div class="ts">' + ts.toLocaleString('de-CH') + '</div>' +
+           '</div>' +
+           sv;
+  }
+
+  function initApp() {
+    if (typeof L === 'undefined') { setTimeout(initApp, 100); return; }
+
+    var map = L.map('map', { zoomControl: true, tap: true }).setView([47.378, 8.540], 13);
+
+    L.tileLayer(
+      'https://cartodb-basemaps-{s}.global.ssl.fastly.net/rastertiles/voyager/{z}/{x}/{y}.png',
+      {
+        attribution: '© OSM · CARTO · Velo: Stadt Zürich · Radar: MeteoSchweiz · Bilder: Mapillary',
+        maxZoom: 19
+      }
+    ).addTo(map);
+
+    // === MeteoSwiss Niederschlag-Layer ===
+    // Über WMTS (Tile-Service), nicht WMS – der messwerte-niederschlag-10min Layer
+    // wird nur als WMTS publiziert. Tiles werden alle 10 Min aktualisiert.
+    // Mit timestamp '{time}' würden wir historische Tiles bekommen; 'current' = jetzt.
+    var rainLayer = L.tileLayer(
+      'https://wmts.geo.admin.ch/1.0.0/ch.meteoschweiz.messwerte-niederschlag-10min/default/current/3857/{z}/{x}/{y}.png',
+      {
+        opacity: 0.7,
+        maxZoom: 18,
+        attribution: '© MeteoSchweiz',
+        // cache-buster: nach 10 Min neuer Hash, damit Browser-Cache nicht alte Tiles behält
+        // (verlängern wenn Last zu hoch)
+      }
+    );
+
+    var LayerToggle = L.Control.extend({
+      options: { position: 'topright' },
+      onAdd: function() {
+        var div = L.DomUtil.create('div', 'layer-toggle');
+        div.innerHTML =
+          '<strong>Wetter</strong>' +
+          '<label>' +
+            '<input type="checkbox" id="toggleRain">' +
+            '<span class="rain-icon"></span>' +
+            '<span>Regen-Radar</span>' +
+          '</label>';
+        L.DomEvent.disableClickPropagation(div);
+        return div;
+      }
+    });
+    new LayerToggle().addTo(map);
+    setTimeout(function() {
+      document.getElementById('toggleRain').addEventListener('change', function(e) {
+        if (e.target.checked) rainLayer.addTo(map);
+        else map.removeLayer(rainLayer);
+      });
+    }, 50);
+
+    var legend = L.control({ position: 'bottomright' });
+    legend.onAdd = function() {
+      var div = L.DomUtil.create('div', 'legend');
+      div.innerHTML =
+        '<strong>Velos / 15min</strong>' +
+        '<div class="row"><span class="dot" style="background:#2a8c5a"></span> 0–10</div>' +
+        '<div class="row"><span class="dot" style="background:#f4a82c"></span> 10–40</div>' +
+        '<div class="row"><span class="dot" style="background:#d94a1f"></span> 40–100</div>' +
+        '<div class="row"><span class="dot" style="background:#dc2626"></span> 100+</div>';
+      return div;
+    };
+    legend.addTo(map);
+
+    setTimeout(function() { map.invalidateSize(); }, 100);
+    setTimeout(function() { map.invalidateSize(); }, 500);
+    window.addEventListener('resize', function() { map.invalidateSize(); });
+    window.addEventListener('orientationchange', function() {
+      setTimeout(function() { map.invalidateSize(); }, 300);
+    });
+
+    // === Stationen laden und Marker setzen ===
+    Promise.all([
+      fetch(API + '/api/stations').then(function(r) { return r.json(); }),
+      fetch(API + '/api/config').then(function(r) { return r.json(); }).catch(function() { return {}; })
+    ]).then(function(results) {
+      stations = results[0];
+      var config = results[1] || {};
+      MAPILLARY_TOKEN = config.mapillary_token || '';
+
+      stations.forEach(function(st) {
+        stationsById[st.id] = st;
+        var m = L.circleMarker([st.lat, st.lon], {
+          radius: 8, color: '#1a1c20', weight: 1.5, fillColor: '#999', fillOpacity: 0.9
+        }).addTo(map);
+
+        // Hover-Tooltip mit Strassenname (= Stations-Bezeichnung)
+        m.bindTooltip(st.name || ('Station ' + st.id), {
+          className: 'station-tooltip',
+          direction: 'top',
+          offset: [0, -8],
+          sticky: false
+        });
+
+        // Klick: Popup mit Detail + Street View
+        m.on('click', function() {
+          openStationPopup(map, m, st);
+        });
+
+        stationMarkers[st.id] = m;
+      });
+
+      buildTimeline();
+      render(currentIdx);
+      updateStatus();
+    }).catch(function(e) {
+      document.getElementById('status').textContent = 'Fehler: ' + e.message;
+      console.error(e);
+    });
+
+    function openStationPopup(map, marker, station) {
+      var ts = timeSlots[currentIdx];
+      var snap = snapshotsCache.get(ts.toISOString()) || new Map();
+      var data = snap.get(station.id) || { velo: 0, precip: 0 };
+
+      // Erst Popup mit Placeholder öffnen, dann Bild nachladen
+      marker.bindPopup(
+        buildPopupHtml(station, data.velo, data.precip, ts, null),
+        { maxWidth: 320, minWidth: 280, closeButton: true }
+      ).openPopup();
+
+      fetchStreetViewImage(station.id, station.lat, station.lon).then(function(url) {
+        // Popup ist evtl. schon geschlossen
+        if (!marker.isPopupOpen()) return;
+        marker.setPopupContent(buildPopupHtml(station, data.velo, data.precip, ts, url));
+      });
+    }
+
+    function buildTimeline() {
+      var now = new Date();
+      now.setMinutes(Math.floor(now.getMinutes() / 15) * 15, 0, 0);
+      timeSlots = [];
+      for (var i = 7 * 96 - 1; i >= 0; i--) {
+        timeSlots.push(new Date(now.getTime() - i * 15 * 60 * 1000));
+      }
+      var slider = document.getElementById('slider');
+      slider.max = timeSlots.length - 1;
+      slider.value = timeSlots.length - 1;
+      currentIdx = timeSlots.length - 1;
+    }
+
+    function fetchSnapshot(ts) {
+      var key = ts.toISOString();
+      if (snapshotsCache.has(key)) return Promise.resolve(snapshotsCache.get(key));
+      return Promise.all([
+        fetch(API + '/api/snapshot?at=' + encodeURIComponent(key) + '&window=900')
+          .then(function(r) { return r.json(); }),
+        fetch(API + '/api/precip/snapshot?at=' + encodeURIComponent(key) + '&window=1800')
+          .then(function(r) { return r.json(); })
+          .catch(function() { return []; })
+      ]).then(function(results) {
+        var m = new Map();
+        for (var i = 0; i < results[0].length; i++) {
+          var row = results[0][i];
+          m.set(row.station_id, { velo: row.total, precip: 0 });
+        }
+        for (var j = 0; j < results[1].length; j++) {
+          var row = results[1][j];
+          var existing = m.get(row.station_id) || { velo: 0, precip: 0 };
+          existing.precip = row.value;
+          m.set(row.station_id, existing);
+        }
+        snapshotsCache.set(key, m);
+        return m;
+      });
+    }
+
+    function render(idx) {
+      currentIdx = idx;
+      var ts = timeSlots[idx];
+      if (!ts) return;
+      document.getElementById('currentTime').textContent =
+        ts.toLocaleString('de-CH', {
+          weekday: 'short', day: '2-digit', month: '2-digit',
+          hour: '2-digit', minute: '2-digit'
+        });
+
+      fetchSnapshot(ts).then(function(snap) {
+        Object.keys(stationMarkers).forEach(function(idStr) {
+          var id = parseInt(idStr, 10);
+          var marker = stationMarkers[id];
+          var data = snap.get(id) || { velo: 0, precip: 0 };
+          var borderColor = data.precip > 0.1 ? '#2563eb' : '#1a1c20';
+          var borderWeight = data.precip > 0.1 ? Math.min(4, 1.5 + data.precip * 0.5) : 1.5;
+          marker.setStyle({
+            fillColor: colorFor(data.velo),
+            radius: radiusFor(data.velo),
+            color: borderColor,
+            weight: borderWeight,
+          });
+
+          // Wenn das Popup dieses Markers offen ist: Inhalt aktualisieren
+          if (marker.isPopupOpen()) {
+            var station = stationsById[id];
+            // Bereits geladenes Street-View-Bild aus dem Cache wiederverwenden
+            var svUrl = streetViewCache.has(id) ? streetViewCache.get(id) : null;
+            marker.setPopupContent(buildPopupHtml(station, data.velo, data.precip, ts, svUrl));
+          }
+        });
+      });
+    }
+
+    // === Controls ===
+    var slider = document.getElementById('slider');
+    slider.addEventListener('input', function(e) { render(parseInt(e.target.value, 10)); });
+
+    var stepButtons = document.querySelectorAll('[data-step]');
+    for (var b = 0; b < stepButtons.length; b++) {
+      (function(btn) {
+        btn.addEventListener('click', function() {
+          var step = parseInt(btn.getAttribute('data-step'), 10);
+          var newIdx = Math.max(0, Math.min(timeSlots.length - 1, currentIdx + step));
+          slider.value = newIdx;
+          render(newIdx);
+        });
+      })(stepButtons[b]);
+    }
+
+    var playBtn = document.getElementById('play');
+    playBtn.addEventListener('click', function() {
+      playing = !playing;
+      playBtn.textContent = playing ? '⏸' : '▶';
+      if (playing) {
+        playTimer = setInterval(function() {
+          var next = currentIdx + 1;
+          if (next > timeSlots.length - 1) next = 0;
+          slider.value = next;
+          render(next);
+        }, 200);
+      } else {
+        clearInterval(playTimer);
+      }
+    });
+
+    function updateStatus() {
+      fetch(API + '/health').then(function(r) { return r.json(); }).then(function(h) {
+        var msg = h.stations + ' Stationen · ' + h.counts.toLocaleString('de-CH') + ' Messwerte';
+        if (h.precip_values) msg += ' · ' + h.precip_values.toLocaleString('de-CH') + ' Regen-Werte';
+        document.getElementById('status').textContent = msg;
+      });
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initApp);
+  } else {
+    initApp();
+  }
+})();
+</script>
+</body>
+</html>

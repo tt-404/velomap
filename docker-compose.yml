@@ -1,0 +1,19 @@
+services:
+  velo-zh:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - velo_data:/data
+    restart: unless-stopped
+    environment:
+      VELO_DB_PATH: /data/velo.db
+      # Optional: Mapillary Access Token für Street-View-Bilder im Popup
+      # Holen unter https://www.mapillary.com/dashboard/developers
+      # Auch via .env-Datei setzbar
+      MAPILLARY_TOKEN: ${MAPILLARY_TOKEN:-}
+
+volumes:
+  velo_data:
