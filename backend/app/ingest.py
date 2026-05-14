@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import io
 import logging
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Iterable
@@ -83,7 +84,7 @@ def fetch_stations() -> list[dict]:
 
 
 def upsert_stations(features: Iterable[dict]) -> int:
-    """Standorte in DB einfügen / aktualisieren. Holt Strassennamen via Nominatim."""
+    """Standorte in DB einfügen / aktualisieren."""
     n = 0
     needs_geocode: list[int] = []
 
@@ -95,7 +96,6 @@ def upsert_stations(features: Iterable[dict]) -> int:
             if not coords:
                 continue
 
-            # GeoJSON ist hier WGS84 → (lon, lat)
             lon, lat = float(coords[0]), float(coords[1])
 
             sid = props.get("id1") or props.get("ID1") or props.get("fk_zaehler")
@@ -118,17 +118,30 @@ def upsert_stations(features: Iterable[dict]) -> int:
             if is_new or not existing.street_name:
                 needs_geocode.append(sid)
 
-    log.info("Standorte upserted: %d neu, %d brauchen Geocoding", n, len(needs_geocode))
+    log.info("Standorte upserted: %d neu, %d brauchen Geocoding (Hintergrund)", n, len(needs_geocode))
 
-    # Nominatim-Lookup: 1 req/s einhalten
+    # Nominatim-Lookup im Hintergrund-Thread — blockiert den Ingest nicht
+    if needs_geocode:
+        threading.Thread(
+            target=_geocode_stations_bg,
+            args=(needs_geocode,),
+            daemon=True,
+            name="nominatim-geocoder",
+        ).start()
+
+    return n
+
+
+def _geocode_stations_bg(station_ids: list[int]) -> None:
+    """Holt Strassennamen via Nominatim im Hintergrund (1 req/s)."""
     geocoded = 0
-    for sid in needs_geocode:
+    for sid in station_ids:
+        time.sleep(1.1)
         with get_session() as s:
             st = s.get(Station, sid)
             if st is None:
                 continue
             lat, lon = st.lat, st.lon
-        time.sleep(1.1)
         street = reverse_geocode_street(lat, lon)
         if street:
             with get_session() as s:
@@ -136,9 +149,7 @@ def upsert_stations(features: Iterable[dict]) -> int:
                 if st:
                     st.street_name = street
                     geocoded += 1
-
-    log.info("Strassennamen per Nominatim geholt: %d", geocoded)
-    return n
+    log.info("Geocoding abgeschlossen: %d/%d Strassennamen geholt", geocoded, len(station_ids))
 
 
 # === Zählwerte ===
