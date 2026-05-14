@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from datetime import datetime
 
 from sqlalchemy import (
-    Column, DateTime, Float, Integer, String, ForeignKey, Index, create_engine
+    Column, DateTime, Float, Integer, String, ForeignKey, Index, create_engine, event
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
@@ -18,6 +18,16 @@ engine = create_engine(
     connect_args={"check_same_thread": False},
     pool_pre_ping=True,
 )
+
+
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragmas(dbapi_conn, _):
+    cur = dbapi_conn.cursor()
+    cur.execute("PRAGMA journal_mode=WAL")   # parallele Reads während Writes
+    cur.execute("PRAGMA busy_timeout=8000")  # 8s warten statt sofort locken
+    cur.close()
+
+
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
 
