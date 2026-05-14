@@ -37,7 +37,8 @@ STAC_BASE = "https://data.geo.admin.ch/api/stac/v1"
 COLLECTION = "ch.meteoschweiz.ogd-radar-precip"
 
 # CombiPrecip 1h-Summe (akkumuliert) – beste Genauigkeit dank Bodenstation-Korrektur
-PRODUCT_PREFIX = "CPC"
+# Hinweis: Dateinamen sind lowercase ("cpc..."), Regex muss case-insensitive sein
+PRODUCT_PREFIX = "cpc"
 PRODUCT_ACCUM = "00060"  # 60-Min-Akkumulation
 
 # Transformer: WGS84 → LV95 (Radar-Daten sind in LV95)
@@ -57,10 +58,12 @@ def stations_lv95() -> dict[int, tuple[float, float]]:
 
 
 def latest_cpc_item_url() -> str | None:
-    """Findet das aktuellste CPC-Item via STAC-API."""
-    # STAC-Items sind nach Datum gruppiert; wir nehmen das aktuellste Item
-    # (= heutiger Tag), dann das letzte Asset darin.
-    url = f"{STAC_BASE}/collections/{COLLECTION}/items?limit=2"
+    """Findet das aktuellste CPC-Asset quer über alle STAC-Items.
+
+    Alle Items haben denselben ``datetime``-Wert, daher wird stattdessen
+    der Dateiname als Sortierschlüssel verwendet (enthält Zeitstempel kodiert).
+    """
+    url = f"{STAC_BASE}/collections/{COLLECTION}/items?limit=20"
     with httpx.Client(timeout=30.0) as client:
         r = client.get(url)
         r.raise_for_status()
@@ -71,19 +74,23 @@ def latest_cpc_item_url() -> str | None:
         log.warning("STAC: keine Items in Collection %s", COLLECTION)
         return None
 
-    # Sortiere nach datetime absteigend (neueste zuerst)
-    features.sort(key=lambda f: f.get("properties", {}).get("datetime", ""), reverse=True)
+    # Alle CPC-60min-Assets aus allen Items sammeln, dann neuestes wählen
+    pattern = re.compile(rf"^{re.escape(PRODUCT_PREFIX)}\d+_{PRODUCT_ACCUM}\.", re.IGNORECASE)
+    best_key: str | None = None
+    best_href: str | None = None
 
-    # Suche das aktuellste CPC-Asset (60min-Akkumulation)
-    pattern = re.compile(rf"^{PRODUCT_PREFIX}\d+\d+_{PRODUCT_ACCUM}\.")
     for feat in features:
-        assets = feat.get("assets", {})
-        # Asset-Keys alphabetisch absteigend = zeitlich neueste zuerst
-        for key in sorted(assets.keys(), reverse=True):
+        for key, asset in feat.get("assets", {}).items():
             if pattern.match(key):
-                return assets[key].get("href")
-    log.warning("STAC: kein CPC-Asset gefunden")
-    return None
+                if best_key is None or key > best_key:
+                    best_key = key
+                    best_href = asset.get("href")
+
+    if best_href:
+        log.info("STAC: neuestes CPC-Asset: %s", best_key)
+    else:
+        log.warning("STAC: kein CPC-Asset gefunden (Items=%d)", len(features))
+    return best_href
 
 
 def parse_filename_timestamp(href: str) -> datetime | None:
@@ -94,7 +101,7 @@ def parse_filename_timestamp(href: str) -> datetime | None:
               yy=25, jjj=318 (Tag 318 von 2025), HHMM=1430, Q=0
     """
     name = href.rsplit("/", 1)[-1]
-    m = re.match(r"^[A-Z]{3}(\d{2})(\d{3})(\d{2})(\d{2})\d", name)
+    m = re.match(r"^[A-Za-z]{3}(\d{2})(\d{3})(\d{2})(\d{2})\d", name)
     if not m:
         return None
     yy, jjj, hh, mm = m.groups()

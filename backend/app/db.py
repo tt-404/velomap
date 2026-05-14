@@ -35,6 +35,7 @@ class Station(Base):
     ost = Column(Float)
     nord = Column(Float)
     bezeichnung = Column(String)
+    street_name = Column(String)  # Strassenname via Nominatim (OSM)
 
     counts = relationship("Count", back_populates="station")
 

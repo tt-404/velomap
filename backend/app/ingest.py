@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import io
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Iterable
 
@@ -44,6 +45,32 @@ def yearly_csv_url(year: int) -> str:
     )
 
 
+_NOMINATIM_UA = "velo-zh-monitor/1.0 (github.com/tt-404/velomap)"
+
+
+def reverse_geocode_street(lat: float, lon: float) -> str | None:
+    """Strassenname via Nominatim (OSM). Hält Nominatim-Limit von 1 req/s ein."""
+    url = (
+        f"https://nominatim.openstreetmap.org/reverse"
+        f"?lat={lat}&lon={lon}&format=json&zoom=17&accept-language=de"
+    )
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            r = client.get(url, headers={"User-Agent": _NOMINATIM_UA})
+            r.raise_for_status()
+            addr = r.json().get("address", {})
+        return (
+            addr.get("road")
+            or addr.get("pedestrian")
+            or addr.get("path")
+            or addr.get("cycleway")
+            or addr.get("footway")
+        )
+    except Exception as e:
+        log.warning("Nominatim fehlgeschlagen (%.5f, %.5f): %s", lat, lon, e)
+        return None
+
+
 # === Standorte ===
 def fetch_stations() -> list[dict]:
     """Standorte als GeoJSON-Features herunterladen."""
@@ -56,8 +83,10 @@ def fetch_stations() -> list[dict]:
 
 
 def upsert_stations(features: Iterable[dict]) -> int:
-    """Standorte in DB einfügen / aktualisieren."""
+    """Standorte in DB einfügen / aktualisieren. Holt Strassennamen via Nominatim."""
     n = 0
+    needs_geocode: list[int] = []
+
     with get_session() as s:
         for feat in features:
             props = feat.get("properties", {})
@@ -75,7 +104,8 @@ def upsert_stations(features: Iterable[dict]) -> int:
             sid = int(sid)
 
             existing = s.get(Station, sid)
-            if existing is None:
+            is_new = existing is None
+            if is_new:
                 existing = Station(id=sid)
                 s.add(existing)
                 n += 1
@@ -84,7 +114,30 @@ def upsert_stations(features: Iterable[dict]) -> int:
             existing.lat = lat
             existing.lon = lon
             existing.bezeichnung = existing.name
-    log.info("Standorte upserted: %d neu", n)
+
+            if is_new or not existing.street_name:
+                needs_geocode.append(sid)
+
+    log.info("Standorte upserted: %d neu, %d brauchen Geocoding", n, len(needs_geocode))
+
+    # Nominatim-Lookup: 1 req/s einhalten
+    geocoded = 0
+    for sid in needs_geocode:
+        with get_session() as s:
+            st = s.get(Station, sid)
+            if st is None:
+                continue
+            lat, lon = st.lat, st.lon
+        time.sleep(1.1)
+        street = reverse_geocode_street(lat, lon)
+        if street:
+            with get_session() as s:
+                st = s.get(Station, sid)
+                if st:
+                    st.street_name = street
+                    geocoded += 1
+
+    log.info("Strassennamen per Nominatim geholt: %d", geocoded)
     return n
 
 

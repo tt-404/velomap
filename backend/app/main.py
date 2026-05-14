@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -99,19 +98,13 @@ def list_stations(include_inactive: bool = Query(False)):
                 "name": r.name,
                 "abkuerzung": r.abkuerzung,
                 "bezeichnung": r.bezeichnung,
+                "street_name": r.street_name or r.name,
                 "lat": r.lat,
                 "lon": r.lon,
             }
             for r in rows
         ]
 
-
-@app.get("/api/config")
-def get_config():
-    """Konfiguration für das Frontend (z.B. Mapillary-Token)."""
-    return {
-        "mapillary_token": os.environ.get("MAPILLARY_TOKEN", ""),
-    }
 
 
 @app.get("/api/counts")
