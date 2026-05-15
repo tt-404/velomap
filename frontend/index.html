@@ -177,6 +177,21 @@
     background: #475569; color: #fff; font-size: 9px; font-weight: 700;
   }
 
+  .layer-toggle .miv-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #7c3aed; color: #fff; font-size: 8px; font-weight: 700;
+  }
+
+  /* === MIV Marker === */
+  .miv-div-icon {
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 50%; border: 2px solid rgba(0,0,0,0.3);
+    font-family: 'JetBrains Mono', monospace; font-weight: 700;
+    font-size: 9px; color: #fff; line-height: 1;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+  }
+
   /* === Parking Marker === */
   .parking-div-icon {
     display: flex; align-items: center; justify-content: center;
@@ -383,6 +398,78 @@
       }).catch(function(e) { console.warn('Parking:', e); });
     }
 
+    // === MIV-Layer ===
+    var mivStations = [];
+    var mivStationsById = {};
+    var mivOnMap = false;
+    var mivLayerGroup = L.layerGroup();
+    var mivSnapshotCache = new Map();
+    var mivDebounce = null;
+
+    function mivColor(total) {
+      if (total >= 500) return '#7c3aed';
+      if (total >= 200) return '#a855f7';
+      if (total >= 50)  return '#c084fc';
+      return '#e9d5ff';
+    }
+    function mivRadius(total) {
+      return 6 + Math.sqrt(total) * 0.5;
+    }
+
+    function buildMivPopup(station, total, ts) {
+      var col = mivColor(total);
+      return '<div class="popup-header">' +
+               '<div class="title">' + (station.street || station.name) + '</div>' +
+               '<div class="id">' + station.name + ' · ' + station.id + '</div>' +
+             '</div>' +
+             '<div class="popup-body">' +
+               '<div>Fahrzeuge / Stunde</div>' +
+               '<span class="big" style="color:' + col + '">' + total + '</span>' +
+               '<div class="ts">' + ts.toLocaleString('de-CH') + '</div>' +
+             '</div>';
+    }
+
+    function fetchMivSnapshot(ts) {
+      // Stündlich → auf ganze Stunde runden
+      var hour = new Date(ts);
+      hour.setMinutes(0, 0, 0);
+      var key = hour.toISOString();
+      if (mivSnapshotCache.has(key)) return Promise.resolve(mivSnapshotCache.get(key));
+      return fetch(API + '/api/miv/snapshot?at=' + encodeURIComponent(key) + '&window=3600')
+        .then(function(r) { return r.json(); })
+        .then(function(rows) {
+          var m = new Map();
+          rows.forEach(function(r) { m.set(r.station_id, r.total); });
+          mivSnapshotCache.set(key, m);
+          return m;
+        })
+        .catch(function() { return new Map(); });
+    }
+
+    function updateMivLayer(ts) {
+      if (!mivOnMap || mivStations.length === 0) return;
+      clearTimeout(mivDebounce);
+      mivDebounce = setTimeout(function() {
+        fetchMivSnapshot(ts).then(function(snap) {
+          mivLayerGroup.clearLayers();
+          mivStations.forEach(function(st) {
+            if (!st.lat || !st.lon) return;
+            var total = snap.get(st.id) || 0;
+            var m = L.circleMarker([st.lat, st.lon], {
+              radius: mivRadius(total),
+              color: '#3b1e6e', weight: 1.5,
+              fillColor: mivColor(total), fillOpacity: 0.85
+            });
+            m.bindTooltip((st.street || st.name), {
+              className: 'station-tooltip', direction: 'top', offset: [0, -8]
+            });
+            m.bindPopup(buildMivPopup(st, total, ts), { maxWidth: 280, minWidth: 220 });
+            mivLayerGroup.addLayer(m);
+          });
+        });
+      }, 300);
+    }
+
     var LayerToggle = L.Control.extend({
       options: { position: 'topright' },
       onAdd: function() {
@@ -398,6 +485,11 @@
             '<input type="checkbox" id="toggleParking">' +
             '<span class="parking-icon">P</span>' +
             '<span>Parkhäuser</span>' +
+          '</label>' +
+          '<label>' +
+            '<input type="checkbox" id="toggleMiv">' +
+            '<span class="miv-icon">🚗</span>' +
+            '<span>MIV</span>' +
           '</label>';
         L.DomEvent.disableClickPropagation(div);
         return div;
@@ -418,13 +510,30 @@
         if (e.target.checked) {
           parkingLayerGroup.addTo(map);
           refreshParking();
-          // alle 2 Min neu laden solange aktiv
           parkingLayerGroup._refreshTimer = setInterval(function() {
             if (parkingOnMap) refreshParking();
           }, 120000);
         } else {
           clearInterval(parkingLayerGroup._refreshTimer);
           map.removeLayer(parkingLayerGroup);
+        }
+      });
+      document.getElementById('toggleMiv').addEventListener('change', function(e) {
+        mivOnMap = e.target.checked;
+        if (e.target.checked) {
+          mivLayerGroup.addTo(map);
+          if (mivStations.length === 0) {
+            fetch(API + '/api/miv/stations').then(function(r) { return r.json(); }).then(function(rows) {
+              mivStations = rows;
+              rows.forEach(function(st) { mivStationsById[st.id] = st; });
+              updateMivLayer(timeSlots[currentIdx]);
+            });
+          } else {
+            updateMivLayer(timeSlots[currentIdx]);
+          }
+        } else {
+          mivLayerGroup.clearLayers();
+          map.removeLayer(mivLayerGroup);
         }
       });
     }, 50);
@@ -542,6 +651,7 @@
         });
 
       updateRadarOverlay(ts);
+      updateMivLayer(ts);
 
       fetchSnapshot(ts).then(function(snap) {
         Object.keys(stationMarkers).forEach(function(idStr) {
