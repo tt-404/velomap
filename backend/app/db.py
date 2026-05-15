@@ -127,6 +127,7 @@ class MivStation(Base):
     id = Column(String, primary_key=True)   # ZSID, z.B. "Z001"
     name = Column(String)                    # ZSName
     street = Column(String)                  # Achse
+    road_class = Column(String)              # "national" | "kantonal" | "kommunal"
     lat = Column(Float)
     lon = Column(Float)
     counts = relationship("MivCount", back_populates="station")

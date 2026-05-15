@@ -14,6 +14,31 @@ from .db import MivCount, MivStation, get_session, init_db
 
 log = logging.getLogger("miv")
 
+# Staatsstrassen (Kanton Zürich) — Achse-Muster, case-insensitive
+_KANTONAL_PATTERNS = [
+    "seestrasse", "albisstrasse", "birmensdorferstrasse", "badenerstrasse",
+    "limmattalstrasse", "regensdorferstrasse", "wehntalerstrasse",
+    "schaffhauserstrasse", "thurgauerstrasse", "ueberlandstrasse",
+    "dübendorfstrasse", "witikonerstrasse", "forchstrasse", "rämistrasse",
+    "winterthurerstrasse", "wallisellenstrasse", "albisriederstrasse",
+    "bellerivestrasse",
+]
+
+# Nationalstrassen — Achse beginnt mit A + Zahl oder enthält "Autobahn"
+import re as _re
+_NATIONAL_RE = _re.compile(r"(^|\s)(A\d|autobahn)", _re.IGNORECASE)
+
+
+def classify_road(zsname: str, achse: str) -> str:
+    text = (zsname + " " + achse).lower()
+    if _NATIONAL_RE.search(achse):
+        return "national"
+    for pat in _KANTONAL_PATTERNS:
+        if pat in text:
+            return "kantonal"
+    return "kommunal"
+
+
 _CSV_URL = (
     "https://data.stadt-zuerich.ch/dataset/"
     "sid_dav_verkehrszaehlung_miv_od2031/download/"
@@ -61,21 +86,19 @@ def run_miv_ingest(initial: bool = False) -> dict:
 def _upsert_miv_stations(df: pd.DataFrame) -> None:
     first = df.drop_duplicates(subset=["ZSID"])
     with get_session() as s:
-        existing = set(r[0] for r in s.execute(
-            __import__("sqlalchemy").select(MivStation.id)
-        ).all())
         for row in first.itertuples(index=False):
             zsid = str(row.ZSID)
-            if zsid in existing:
-                continue
+            achse = str(row.Achse) if hasattr(row, "Achse") else ""
+            zsname = str(row.ZSName)
             try:
                 lat, lon = lv95_to_wgs84(float(row.EKoord), float(row.NKoord))
             except Exception:
                 lat, lon = None, None
             s.merge(MivStation(
                 id=zsid,
-                name=str(row.ZSName),
-                street=str(row.Achse) if hasattr(row, "Achse") else None,
+                name=zsname,
+                street=achse or None,
+                road_class=classify_road(zsname, achse),
                 lat=lat,
                 lon=lon,
             ))
@@ -132,7 +155,8 @@ def get_miv_stations() -> list[dict]:
             .where(MivStation.id.in_(active))
         ).scalars().all()
         return [
-            {"id": r.id, "name": r.name, "street": r.street, "lat": r.lat, "lon": r.lon}
+            {"id": r.id, "name": r.name, "street": r.street,
+             "road_class": r.road_class or "kommunal", "lat": r.lat, "lon": r.lon}
             for r in rows
         ]
 

@@ -420,29 +420,27 @@
       }).catch(function(e) { console.warn('Parking:', e); });
     }
 
-    // === MIV-Layer ===
+    // === MIV-Layer (National / Kantonal / Kommunal) ===
     var mivStations = [];
     var mivStationsById = {};
-    var mivOnMap = false;
-    var mivLayerGroup = L.layerGroup();
+    var mivVisible = { national: false, kantonal: false, kommunal: false };
+    var mivGroups = {
+      national: L.layerGroup(),
+      kantonal: L.layerGroup(),
+      kommunal: L.layerGroup()
+    };
+    var mivGroupColors = { national: '#dc2626', kantonal: '#7c3aed', kommunal: '#a855f7' };
     var mivSnapshotCache = new Map();
     var mivDebounce = null;
 
-    function mivColor(total) {
-      if (total >= 500) return '#7c3aed';
-      if (total >= 200) return '#a855f7';
-      if (total >= 50)  return '#c084fc';
-      return '#e9d5ff';
-    }
-    function mivRadius(total) {
-      return 6 + Math.sqrt(total) * 0.5;
-    }
+    function mivRadius(total) { return 6 + Math.sqrt(total) * 0.5; }
 
     function buildMivPopup(station, total, ts) {
-      var col = mivColor(total);
+      var col = mivGroupColors[station.road_class] || '#7c3aed';
+      var classLabel = { national: 'Nationalstrasse', kantonal: 'Kantonsstrasse', kommunal: 'Gemeindestrasse' }[station.road_class] || '';
       return '<div class="popup-header">' +
                '<div class="title">' + (station.street || station.name) + '</div>' +
-               '<div class="id">' + station.name + ' · ' + station.id + '</div>' +
+               '<div class="id">' + station.name + ' · ' + classLabel + '</div>' +
              '</div>' +
              '<div class="popup-body">' +
                '<div>Fahrzeuge / Stunde</div>' +
@@ -452,7 +450,6 @@
     }
 
     function fetchMivSnapshot(ts) {
-      // Stündlich → auf ganze Stunde runden
       var hour = new Date(ts);
       hour.setMinutes(0, 0, 0);
       var key = hour.toISOString();
@@ -469,24 +466,29 @@
     }
 
     function updateMivLayer(ts) {
-      if (!mivOnMap || mivStations.length === 0) return;
+      var anyOn = mivVisible.national || mivVisible.kantonal || mivVisible.kommunal;
+      if (!anyOn || mivStations.length === 0) return;
       clearTimeout(mivDebounce);
       mivDebounce = setTimeout(function() {
         fetchMivSnapshot(ts).then(function(snap) {
-          mivLayerGroup.clearLayers();
-          mivStations.forEach(function(st) {
-            if (!st.lat || !st.lon) return;
-            var total = snap.get(st.id) || 0;
-            var m = L.circleMarker([st.lat, st.lon], {
-              radius: mivRadius(total),
-              color: '#3b1e6e', weight: 1.5,
-              fillColor: mivColor(total), fillOpacity: 0.85
+          ['national', 'kantonal', 'kommunal'].forEach(function(cls) {
+            if (!mivVisible[cls]) return;
+            mivGroups[cls].clearLayers();
+            var col = mivGroupColors[cls];
+            mivStations.filter(function(st) { return st.road_class === cls; }).forEach(function(st) {
+              if (!st.lat || !st.lon) return;
+              var total = snap.get(st.id) || 0;
+              var m = L.circleMarker([st.lat, st.lon], {
+                radius: mivRadius(total),
+                color: col, weight: 1.5,
+                fillColor: col, fillOpacity: 0.8
+              });
+              m.bindTooltip((st.street || st.name), {
+                className: 'station-tooltip', direction: 'top', offset: [0, -8]
+              });
+              m.bindPopup(buildMivPopup(st, total, ts), { maxWidth: 280, minWidth: 220 });
+              mivGroups[cls].addLayer(m);
             });
-            m.bindTooltip((st.street || st.name), {
-              className: 'station-tooltip', direction: 'top', offset: [0, -8]
-            });
-            m.bindPopup(buildMivPopup(st, total, ts), { maxWidth: 280, minWidth: 220 });
-            mivLayerGroup.addLayer(m);
           });
         });
       }, 300);
@@ -684,9 +686,19 @@
             '<span>Parkhäuser</span>' +
           '</label>' +
           '<label>' +
-            '<input type="checkbox" id="toggleMiv">' +
-            '<span class="miv-icon">🚗</span>' +
-            '<span>MIV</span>' +
+            '<input type="checkbox" id="toggleMivNational">' +
+            '<span class="miv-icon" style="background:#dc2626">N</span>' +
+            '<span>MIV National</span>' +
+          '</label>' +
+          '<label>' +
+            '<input type="checkbox" id="toggleMivKantonal">' +
+            '<span class="miv-icon" style="background:#7c3aed">K</span>' +
+            '<span>MIV Kantonal</span>' +
+          '</label>' +
+          '<label>' +
+            '<input type="checkbox" id="toggleMivKommunal">' +
+            '<span class="miv-icon" style="background:#a855f7">G</span>' +
+            '<span>MIV Kommunal</span>' +
           '</label>' +
           '<label>' +
             '<input type="checkbox" id="toggleWaterTemp">' +
@@ -737,23 +749,26 @@
           map.removeLayer(parkingLayerGroup);
         }
       });
-      document.getElementById('toggleMiv').addEventListener('change', function(e) {
-        mivOnMap = e.target.checked;
-        if (e.target.checked) {
-          mivLayerGroup.addTo(map);
-          if (mivStations.length === 0) {
-            fetch(API + '/api/miv/stations').then(function(r) { return r.json(); }).then(function(rows) {
-              mivStations = rows;
-              rows.forEach(function(st) { mivStationsById[st.id] = st; });
+      ['national', 'kantonal', 'kommunal'].forEach(function(cls) {
+        var idMap = { national: 'toggleMivNational', kantonal: 'toggleMivKantonal', kommunal: 'toggleMivKommunal' };
+        document.getElementById(idMap[cls]).addEventListener('change', function(e) {
+          mivVisible[cls] = e.target.checked;
+          if (e.target.checked) {
+            mivGroups[cls].addTo(map);
+            if (mivStations.length === 0) {
+              fetch(API + '/api/miv/stations').then(function(r) { return r.json(); }).then(function(rows) {
+                mivStations = rows;
+                rows.forEach(function(st) { mivStationsById[st.id] = st; });
+                updateMivLayer(timeSlots[currentIdx]);
+              });
+            } else {
               updateMivLayer(timeSlots[currentIdx]);
-            });
+            }
           } else {
-            updateMivLayer(timeSlots[currentIdx]);
+            mivGroups[cls].clearLayers();
+            map.removeLayer(mivGroups[cls]);
           }
-        } else {
-          mivLayerGroup.clearLayers();
-          map.removeLayer(mivLayerGroup);
-        }
+        });
       });
 
       document.getElementById('toggleWaterTemp').addEventListener('change', function(e) {
