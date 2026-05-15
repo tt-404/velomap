@@ -171,6 +171,32 @@
     display: inline-block; width: 14px; height: 14px; border-radius: 50%;
     background: linear-gradient(135deg, #93c5fd 0%, #2563eb 100%);
   }
+  .layer-toggle .parking-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 14px; height: 14px; border-radius: 3px;
+    background: #475569; color: #fff; font-size: 9px; font-weight: 700;
+  }
+
+  /* === Parking Marker === */
+  .parking-div-icon {
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 4px; border: 2px solid rgba(0,0,0,0.35);
+    font-family: 'JetBrains Mono', monospace; font-weight: 700;
+    font-size: 10px; color: #fff; line-height: 1;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+  }
+
+  /* === Parking Popup === */
+  .popup-parking-free {
+    font-family: 'JetBrains Mono', monospace; font-size: 22px; font-weight: 600;
+    display: block; margin-top: 2px;
+  }
+  .popup-parking-status {
+    display: inline-block; padding: 2px 6px; border-radius: 4px;
+    font-size: 10px; font-weight: 600; margin-top: 4px; text-transform: uppercase;
+  }
+  .popup-parking-status.open  { background: #dcfce7; color: #166534; }
+  .popup-parking-status.closed { background: #fee2e2; color: #991b1b; }
   .leaflet-control-attribution {
     background: rgba(255,255,255,0.9) !important; color: var(--muted) !important;
     font-size: 9px !important;
@@ -296,16 +322,82 @@
       }, 300);
     }
 
+    // === Parkhaus-Layer ===
+    var parkingMarkers = {};
+    var parkingOnMap = false;
+    var parkingLayerGroup = L.layerGroup();
+
+    function parkingColor(free, status) {
+      if (status === 'closed') return '#94a3b8';
+      if (free === null) return '#94a3b8';
+      if (free > 50)  return '#2a8c5a';
+      if (free > 10)  return '#f4a82c';
+      return '#dc2626';
+    }
+
+    function buildParkingIcon(free, status) {
+      var bg = parkingColor(free, status);
+      var label = status === 'closed' ? 'P' : (free !== null ? String(free) : 'P');
+      var size = label.length > 2 ? 36 : 28;
+      return L.divIcon({
+        className: '',
+        html: '<div class="parking-div-icon" style="width:' + size + 'px;height:22px;background:' + bg + '">' + label + '</div>',
+        iconSize: [size, 22],
+        iconAnchor: [size / 2, 11],
+        popupAnchor: [0, -14]
+      });
+    }
+
+    function buildParkingPopup(g) {
+      var col = parkingColor(g.free, g.status);
+      var statusClass = g.status === 'open' ? 'open' : 'closed';
+      var statusLabel = g.status === 'open' ? 'Offen' : 'Geschlossen';
+      var ts = g.ts ? new Date(g.ts).toLocaleString('de-CH') : '–';
+      return '<div class="popup-header">' +
+               '<div class="title">' + g.name + '</div>' +
+               '<div class="id">' + (g.address || '') + '</div>' +
+             '</div>' +
+             '<div class="popup-body">' +
+               '<div>Freie Plätze</div>' +
+               '<span class="popup-parking-free" style="color:' + col + '">' +
+                 (g.free !== null ? g.free : '–') +
+               '</span>' +
+               '<div><span class="popup-parking-status ' + statusClass + '">' + statusLabel + '</span></div>' +
+               '<div class="ts">' + ts + '</div>' +
+             '</div>';
+    }
+
+    function refreshParking() {
+      if (!parkingOnMap) return;
+      fetch(API + '/api/parking').then(function(r) { return r.json(); }).then(function(garages) {
+        parkingLayerGroup.clearLayers();
+        parkingMarkers = {};
+        garages.forEach(function(g) {
+          if (!g.lat || !g.lon) return;
+          var m = L.marker([g.lat, g.lon], { icon: buildParkingIcon(g.free, g.status) });
+          m.bindTooltip(g.name, { className: 'station-tooltip', direction: 'top', offset: [0, -14] });
+          m.bindPopup(buildParkingPopup(g), { maxWidth: 300, minWidth: 220, closeButton: true });
+          parkingLayerGroup.addLayer(m);
+          parkingMarkers[g.slug] = m;
+        });
+      }).catch(function(e) { console.warn('Parking:', e); });
+    }
+
     var LayerToggle = L.Control.extend({
       options: { position: 'topright' },
       onAdd: function() {
         var div = L.DomUtil.create('div', 'layer-toggle');
         div.innerHTML =
-          '<strong>Wetter</strong>' +
+          '<strong>Layer</strong>' +
           '<label>' +
             '<input type="checkbox" id="toggleRain">' +
             '<span class="rain-icon"></span>' +
             '<span>Regen-Radar</span>' +
+          '</label>' +
+          '<label>' +
+            '<input type="checkbox" id="toggleParking">' +
+            '<span class="parking-icon">P</span>' +
+            '<span>Parkhäuser</span>' +
           '</label>';
         L.DomEvent.disableClickPropagation(div);
         return div;
@@ -319,6 +411,20 @@
           updateRadarOverlay(timeSlots[currentIdx]);
         } else {
           if (radarOverlay) map.removeLayer(radarOverlay);
+        }
+      });
+      document.getElementById('toggleParking').addEventListener('change', function(e) {
+        parkingOnMap = e.target.checked;
+        if (e.target.checked) {
+          parkingLayerGroup.addTo(map);
+          refreshParking();
+          // alle 2 Min neu laden solange aktiv
+          parkingLayerGroup._refreshTimer = setInterval(function() {
+            if (parkingOnMap) refreshParking();
+          }, 120000);
+        } else {
+          clearInterval(parkingLayerGroup._refreshTimer);
+          map.removeLayer(parkingLayerGroup);
         }
       });
     }, 50);
