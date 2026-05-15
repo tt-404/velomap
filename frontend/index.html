@@ -490,6 +490,25 @@
       }
     });
 
+    // Tastatursteuerung
+    document.addEventListener('keydown', function(e) {
+      // Nicht auslösen wenn Fokus in einem Input/Select-Feld liegt
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+      var step = 0;
+      if (e.code === 'Space') {
+        e.preventDefault();
+        playBtn.click();
+        return;
+      }
+      if (e.code === 'ArrowRight') { step = e.shiftKey ? 4 : 1; }
+      if (e.code === 'ArrowLeft')  { step = e.shiftKey ? -4 : -1; }
+      if (step === 0) return;
+      e.preventDefault();
+      var newIdx = Math.max(0, Math.min(timeSlots.length - 1, currentIdx + step));
+      slider.value = newIdx;
+      render(newIdx);
+    });
+
     function updateStatus() {
       fetch(API + '/health').then(function(r) { return r.json(); }).then(function(h) {
         var msg = h.stations + ' Stationen · ' + h.counts.toLocaleString('de-CH') + ' Messwerte';
