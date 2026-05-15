@@ -528,7 +528,8 @@
     var mivSnapshotCache = new Map();
     var mivDebounce = null;
 
-    function mivRadius(total) { return 6 + Math.sqrt(total) * 0.5; }
+    function mivRadius(total) { return Math.min(28, 4 + total / 80); }
+    function mivOpacity(total) { return Math.min(0.92, 0.18 + total / 2000); }
 
     function buildMivPopup(station, total, ts) {
       var col = mivGroupColors[station.road_class] || '#7c3aed';
@@ -573,10 +574,11 @@
             mivStations.filter(function(st) { return st.road_class === cls; }).forEach(function(st) {
               if (!st.lat || !st.lon) return;
               var total = snap.get(st.id) || 0;
+              var opacity = mivOpacity(total);
               var m = L.circleMarker([st.lat, st.lon], {
                 radius: mivRadius(total),
-                color: col, weight: 1.5,
-                fillColor: col, fillOpacity: 0.8
+                color: col, weight: 1, opacity: opacity,
+                fillColor: col, fillOpacity: opacity
               });
               m.bindTooltip((st.street || st.name), {
                 className: 'station-tooltip', direction: 'top', offset: [0, -8]
