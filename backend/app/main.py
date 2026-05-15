@@ -16,6 +16,7 @@ from sqlalchemy import func, select
 
 from .db import Count, Precip, Station, get_session, init_db
 from .ingest import run_ingest
+from .miv import get_miv_snapshot, get_miv_stations, run_miv_ingest
 from .parking import get_current_parking, run_parking_ingest
 from .radar import ccs4_bounds_wgs84, render_radar_png_at, run_radar_ingest
 from .scheduler import shutdown_scheduler, start_scheduler
@@ -39,6 +40,7 @@ async def lifespan(app: FastAPI):
         threading.Thread(target=lambda: run_ingest(initial=True), daemon=True).start()
     import threading
     threading.Thread(target=run_parking_ingest, daemon=True).start()
+    threading.Thread(target=lambda: run_miv_ingest(initial=False), daemon=True).start()
     start_scheduler()
     yield
     shutdown_scheduler()
@@ -263,6 +265,29 @@ def trigger_ingest(background: BackgroundTasks, initial: bool = False):
     """Manueller Trigger für Velo-Ingest."""
     background.add_task(run_ingest, initial=initial)
     return {"status": "scheduled", "type": "velo", "initial": initial}
+
+
+@app.get("/api/miv/stations")
+def miv_stations():
+    """MIV-Zählstellen mit Koordinaten."""
+    return get_miv_stations()
+
+
+@app.get("/api/miv/snapshot")
+def miv_snapshot(at: str = Query(...), window: int = Query(3600)):
+    """MIV-Fahrzeugzahlen aller Stationen zu einem Zeitpunkt (Default ±30 Min)."""
+    try:
+        t_at = isoparse(at)
+    except Exception:
+        raise HTTPException(400, "Ungültiger Zeitpunkt")
+    return get_miv_snapshot(t_at, window_seconds=window)
+
+
+@app.post("/api/ingest/miv")
+def trigger_miv(background: BackgroundTasks, initial: bool = False):
+    """Manueller Trigger für MIV-Ingest."""
+    background.add_task(run_miv_ingest, initial=initial)
+    return {"status": "scheduled", "type": "miv", "initial": initial}
 
 
 @app.get("/api/parking")

@@ -92,6 +92,34 @@ class Precip(Base):
     )
 
 
+class MivStation(Base):
+    """MIV-Zählstelle (Strassenverkehr, Stadt Zürich)."""
+    __tablename__ = "miv_stations"
+    id = Column(String, primary_key=True)   # ZSID, z.B. "Z001"
+    name = Column(String)                    # ZSName
+    street = Column(String)                  # Achse
+    lat = Column(Float)
+    lon = Column(Float)
+    counts = relationship("MivCount", back_populates="station")
+
+
+class MivCount(Base):
+    """Stündlicher MIV-Zählwert pro Richtung."""
+    __tablename__ = "miv_counts"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    station_id = Column(String, ForeignKey("miv_stations.id"), nullable=False)
+    direction = Column(String)               # Richtung, z.B. "auswärts"
+    ts = Column(DateTime, nullable=False)    # MessungDatZeit (stündlich)
+    count = Column(Integer)                  # AnzFahrzeuge
+    station = relationship("MivStation", back_populates="counts")
+
+    __table_args__ = (
+        Index("ix_miv_ts", "ts"),
+        Index("ix_miv_station_ts", "station_id", "ts"),
+        Index("uq_miv_natural", "station_id", "direction", "ts", unique=True),
+    )
+
+
 class ParkingGarage(Base):
     """Parkhaus im Zürcher Parkleitsystem."""
     __tablename__ = "parking_garages"
