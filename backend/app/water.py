@@ -83,30 +83,37 @@ def _ingest_tecdottir(initial: bool = False) -> int:
     if initial:
         end = datetime.now(timezone.utc)
         start = end - timedelta(days=8)
-        date_params = (f"&startDate={start.strftime('%Y-%m-%d')}"
-                       f"&endDate={end.strftime('%Y-%m-%d')}")
+        extra = {"startDate": start.strftime("%Y-%m-%d"), "endDate": end.strftime("%Y-%m-%d")}
+        offsets = [0, 500]  # zwei Seiten à 500 = ~8 Tage
     else:
-        date_params = ""
+        extra = {}
+        offsets = [0]
+
     for sid, info in _TECDOTTIR_STATIONS.items():
-        limit_param = "" if initial else "&limit=3"
-        url = (f"{_TECDOTTIR_BASE}/{info['slug']}"
-               f"?sort=timestamp_utc%20desc{limit_param}{date_params}")
-        try:
-            with httpx.Client(timeout=60.0) as c:
-                r = c.get(url)
-                r.raise_for_status()
-            for row in r.json().get("result", []):
-                vals = row.get("values", {})
-                temp = vals.get("water_temperature", {}).get("value")
-                level = vals.get("water_level", {}).get("value")
-                records.append({
-                    "station_id": sid,
-                    "ts": datetime.fromisoformat(row["timestamp"].replace("Z", "+00:00")),
-                    "temperature": float(temp) if temp is not None else None,
-                    "height": float(level) if level is not None else None,
-                })
-        except Exception as e:
-            log.warning("Tecdottir %s fehlgeschlagen: %s", sid, e)
+        for offset in offsets:
+            params = {"sort": "timestamp_utc desc", **extra}
+            if offset:
+                params["offset"] = offset
+            try:
+                with httpx.Client(timeout=60.0) as c:
+                    r = c.get(f"{_TECDOTTIR_BASE}/{info['slug']}", params=params)
+                    r.raise_for_status()
+                rows = r.json().get("result", [])
+                if not rows:
+                    break
+                for row in rows:
+                    vals = row.get("values", {})
+                    temp = vals.get("water_temperature", {}).get("value")
+                    level = vals.get("water_level", {}).get("value")
+                    records.append({
+                        "station_id": sid,
+                        "ts": datetime.fromisoformat(row["timestamp"].replace("Z", "+00:00")),
+                        "temperature": float(temp) if temp is not None else None,
+                        "height": float(level) if level is not None else None,
+                    })
+            except Exception as e:
+                log.warning("Tecdottir %s offset=%s fehlgeschlagen: %s", sid, offset, e)
+                break
     return _bulk_insert(records)
 
 
