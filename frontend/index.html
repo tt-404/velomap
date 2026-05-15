@@ -356,7 +356,7 @@
         if (radarOverlay) map.removeLayer(radarOverlay);
         radarOverlay = L.imageOverlay(url, radarBounds, { opacity: 0.7, attribution: '© MeteoSchweiz' });
         radarOverlay.addTo(map);
-      }, 300);
+      }, 150);
     }
 
     // === Parkhaus-Layer ===
@@ -747,7 +747,7 @@
           if (waterTempOnMap)  _updateWaterGroup(waterTempGroup, snap, 'temp', ts);
           if (waterLevelOnMap) _updateWaterGroup(waterLevelGroup, snap, 'level', ts);
         });
-      }, 300);
+      }, 150);
     }
 
     function _loadWaterStations(cb) {
