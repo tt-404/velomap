@@ -16,5 +16,5 @@ jobs:
       - name: Rebuild and restart containers
         run: |
           cd ${{ secrets.PI_PATH }}
-          docker compose up --build -d
-          docker image prune -f
+          podman compose up --build -d
+          podman image prune -f
