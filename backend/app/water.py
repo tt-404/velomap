@@ -80,12 +80,19 @@ def _ingest_tecdottir(initial: bool = False) -> int:
                                  water_type=info["water_type"], lat=info["lat"], lon=info["lon"]))
 
     records = []
-    limit = 1152 if initial else 3  # 1152 = 8 Tage à 10-Min-Intervall
+    if initial:
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(days=8)
+        date_params = (f"&startDate={start.strftime('%Y-%m-%d')}"
+                       f"&endDate={end.strftime('%Y-%m-%d')}")
+    else:
+        date_params = ""
     for sid, info in _TECDOTTIR_STATIONS.items():
+        limit_param = "" if initial else "&limit=3"
         url = (f"{_TECDOTTIR_BASE}/{info['slug']}"
-               f"?limit={limit}&sort=timestamp_utc%20desc")
+               f"?sort=timestamp_utc%20desc{limit_param}{date_params}")
         try:
-            with httpx.Client(timeout=30.0) as c:
+            with httpx.Client(timeout=60.0) as c:
                 r = c.get(url)
                 r.raise_for_status()
             for row in r.json().get("result", []):
