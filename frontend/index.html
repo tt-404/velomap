@@ -268,25 +268,36 @@
     L.tileLayer(
       'https://cartodb-basemaps-{s}.global.ssl.fastly.net/rastertiles/voyager/{z}/{x}/{y}.png',
       {
-        attribution: '© OSM · CARTO · Velo: Stadt Zürich · Radar: MeteoSchweiz',
+        attribution: '© OSM · CARTO · Velo: Stadt Zürich · Radar: RainViewer',
         maxZoom: 19
       }
     ).addTo(map);
 
-    // === MeteoSwiss Niederschlag-Layer ===
-    // Über WMTS (Tile-Service), nicht WMS – der messwerte-niederschlag-10min Layer
-    // wird nur als WMTS publiziert. Tiles werden alle 10 Min aktualisiert.
-    // Mit timestamp '{time}' würden wir historische Tiles bekommen; 'current' = jetzt.
-    var rainLayer = L.tileLayer(
-      'https://wmts.geo.admin.ch/1.0.0/ch.meteoschweiz.messwerte-niederschlag-10min/default/current/3857/{z}/{x}/{y}.png',
-      {
-        opacity: 0.7,
-        maxZoom: 18,
-        attribution: '© MeteoSchweiz',
-        // cache-buster: nach 10 Min neuer Hash, damit Browser-Cache nicht alte Tiles behält
-        // (verlängern wenn Last zu hoch)
-      }
-    );
+    // === RainViewer Radar-Layer ===
+    // Aktuellsten Zeitstempel von der RainViewer-API holen, dann Tiles laden.
+    var rainLayer = null;
+    var rainLayerOnMap = false;
+
+    function loadRainLayer() {
+      fetch('https://api.rainviewer.com/public/weather-maps.json')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          var frames = data.radar && data.radar.past;
+          if (!frames || !frames.length) return;
+          var latest = frames[frames.length - 1];
+          var tileUrl = data.host + latest.path + '/256/{z}/{x}/{y}/2/1_1.png';
+          if (rainLayer) map.removeLayer(rainLayer);
+          rainLayer = L.tileLayer(tileUrl, {
+            opacity: 0.6,
+            maxZoom: 18,
+            attribution: '© RainViewer'
+          });
+          if (rainLayerOnMap) rainLayer.addTo(map);
+        })
+        .catch(function(e) { console.warn('RainViewer:', e); });
+    }
+    loadRainLayer();
+    setInterval(loadRainLayer, 5 * 60 * 1000); // alle 5 Min aktualisieren
 
     var LayerToggle = L.Control.extend({
       options: { position: 'topright' },
@@ -306,8 +317,12 @@
     new LayerToggle().addTo(map);
     setTimeout(function() {
       document.getElementById('toggleRain').addEventListener('change', function(e) {
-        if (e.target.checked) rainLayer.addTo(map);
-        else map.removeLayer(rainLayer);
+        rainLayerOnMap = e.target.checked;
+        if (e.target.checked) {
+          if (rainLayer) rainLayer.addTo(map);
+        } else {
+          if (rainLayer) map.removeLayer(rainLayer);
+        }
       });
     }, 50);
 
