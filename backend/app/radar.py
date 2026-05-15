@@ -25,6 +25,7 @@ from datetime import datetime, timedelta, timezone
 import h5py
 import httpx
 import numpy as np
+from PIL import Image
 from pyproj import Transformer
 from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -41,8 +42,117 @@ COLLECTION = "ch.meteoschweiz.ogd-radar-precip"
 PRODUCT_PREFIX = "cpc"
 PRODUCT_ACCUM = "00060"  # 60-Min-Akkumulation
 
-# Transformer: WGS84 → LV95 (Radar-Daten sind in LV95)
+# Transformer: WGS84 ↔ LV95
 _WGS_TO_LV95 = Transformer.from_crs("EPSG:4326", "EPSG:2056", always_xy=True)
+_LV95_TO_WGS = Transformer.from_crs("EPSG:2056", "EPSG:4326", always_xy=True)
+
+# CCS4-Grid-Konstanten (1km, 710×640)
+_CCS4 = {"x0": 2_255_000.0, "y0": 1_480_000.0, "px": 1000.0, "cols": 710, "rows": 640}
+
+# Farbskala mm/h → RGBA (MeteoSwiss-ähnlich)
+_COLORMAP = [
+    (0.1,  (180, 220, 255, 130)),
+    (0.5,  (100, 180, 255, 160)),
+    (2.0,  (50,  140, 255, 185)),
+    (5.0,  (0,   200, 100, 200)),
+    (10.0, (255, 230,   0, 210)),
+    (20.0, (255, 140,   0, 220)),
+    (50.0, (255,   0,   0, 230)),
+]
+
+# Cache für das zuletzt gerenderte PNG
+_png_cache: dict = {"href": None, "png": None}
+
+
+def ccs4_bounds_wgs84() -> list:
+    """WGS84-Grenzen des CCS4-Grids für Leaflet imageOverlay [[sw], [ne]]."""
+    ul_lon, ul_lat = _LV95_TO_WGS.transform(_CCS4["x0"], _CCS4["y0"])
+    lr_lon, lr_lat = _LV95_TO_WGS.transform(
+        _CCS4["x0"] + _CCS4["cols"] * _CCS4["px"],
+        _CCS4["y0"] - _CCS4["rows"] * _CCS4["px"],
+    )
+    return [[lr_lat, ul_lon], [ul_lat, lr_lon]]
+
+
+def latest_rzc_item_url() -> str | None:
+    """Findet das aktuellste RZC-Asset (instantane mm/h, 5-Min-Takt)."""
+    url = f"{STAC_BASE}/collections/{COLLECTION}/items?limit=20"
+    with httpx.Client(timeout=30.0) as client:
+        r = client.get(url)
+        r.raise_for_status()
+        data = r.json()
+
+    pattern = re.compile(r"^rzc\d+vl\.", re.IGNORECASE)
+    best_key: str | None = None
+    best_href: str | None = None
+    for feat in data.get("features", []):
+        for key, asset in feat.get("assets", {}).items():
+            if pattern.match(key):
+                if best_key is None or key > best_key:
+                    best_key = key
+                    best_href = asset.get("href")
+
+    if best_href:
+        log.info("STAC: neuestes RZC-Asset: %s", best_key)
+    else:
+        log.warning("STAC: kein RZC-Asset gefunden")
+    return best_href
+
+
+def render_radar_png() -> bytes | None:
+    """Rendert das aktuellste RZC-Bild als RGBA-PNG mit Niederschlags-Farbskala."""
+    href = latest_rzc_item_url()
+    if not href:
+        return _png_cache.get("png")
+
+    if _png_cache["href"] == href and _png_cache["png"]:
+        return _png_cache["png"]
+
+    try:
+        h5_bytes = download_radar_file(href)
+    except Exception as e:
+        log.error("Radar-PNG: Download fehlgeschlagen: %s", e)
+        return _png_cache.get("png")
+
+    try:
+        png_bytes = _h5_to_png(h5_bytes)
+    except Exception as e:
+        log.error("Radar-PNG: Rendering fehlgeschlagen: %s", e)
+        return _png_cache.get("png")
+
+    _png_cache["href"] = href
+    _png_cache["png"] = png_bytes
+    log.info("Radar-PNG generiert: %d bytes", len(png_bytes))
+    return png_bytes
+
+
+def _h5_to_png(h5_bytes: bytes) -> bytes:
+    """Konvertiert HDF5-Radar-Daten zu RGBA-PNG."""
+    with h5py.File(io.BytesIO(h5_bytes), "r") as f:
+        data = f["/dataset1/data1/data"][...]
+        what = f["/dataset1/data1/what"]
+        gain    = float(what.attrs.get("gain", 1.0))
+        offset  = float(what.attrs.get("offset", 0.0))
+        nodata  = float(what.attrs.get("nodata", 65535))
+        undetect = float(what.attrs.get("undetect", 0))
+
+    rows, cols = data.shape
+    raw = data.astype(np.float32)
+    valid = (raw != nodata) & (raw != undetect)
+    values = np.where(valid, raw * gain + offset, 0.0)
+
+    rgba = np.zeros((rows, cols, 4), dtype=np.uint8)
+    for threshold, color in reversed(_COLORMAP):
+        mask = valid & (values >= threshold)
+        rgba[mask] = color
+
+    img = Image.fromarray(rgba, mode="RGBA")
+    # Auf halbe Auflösung skalieren (355×320 statt 710×640)
+    img = img.resize((cols // 2, rows // 2), Image.NEAREST)
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
 
 
 def stations_lv95() -> dict[int, tuple[float, float]]:

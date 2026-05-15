@@ -10,13 +10,13 @@ from typing import Optional
 from dateutil.parser import isoparse
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select
 
 from .db import Count, Precip, Station, get_session, init_db
 from .ingest import run_ingest
-from .radar import run_radar_ingest
+from .radar import ccs4_bounds_wgs84, render_radar_png, run_radar_ingest
 from .scheduler import shutdown_scheduler, start_scheduler
 
 logging.basicConfig(level=logging.INFO,
@@ -266,6 +266,25 @@ def trigger_radar(background: BackgroundTasks):
     """Manueller Trigger für Radar-Ingest."""
     background.add_task(run_radar_ingest)
     return {"status": "scheduled", "type": "radar"}
+
+
+@app.get("/api/radar/bounds")
+def radar_bounds():
+    """WGS84-Grenzen des CCS4-Grids für Leaflet imageOverlay."""
+    return ccs4_bounds_wgs84()
+
+
+@app.get("/api/radar/latest.png")
+def radar_latest_png():
+    """Aktuellstes RZC-Radar als RGBA-PNG (MeteoSwiss OpenData)."""
+    png = render_radar_png()
+    if not png:
+        raise HTTPException(503, "Kein Radar-Bild verfügbar")
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
 
 
 # === Frontend serven ===

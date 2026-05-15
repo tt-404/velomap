@@ -268,36 +268,28 @@
     L.tileLayer(
       'https://cartodb-basemaps-{s}.global.ssl.fastly.net/rastertiles/voyager/{z}/{x}/{y}.png',
       {
-        attribution: '© OSM · CARTO · Velo: Stadt Zürich · Radar: RainViewer',
+        attribution: '© OSM · CARTO · Velo: Stadt Zürich · Radar: MeteoSchweiz',
         maxZoom: 19
       }
     ).addTo(map);
 
-    // === RainViewer Radar-Layer ===
-    // Aktuellsten Zeitstempel von der RainViewer-API holen, dann Tiles laden.
-    var rainLayer = null;
-    var rainLayerOnMap = false;
+    // === MeteoSwiss Radar-Overlay (OpenData RZC via Backend) ===
+    var radarOverlay = null;
+    var radarOnMap = false;
 
-    function loadRainLayer() {
-      fetch('https://api.rainviewer.com/public/weather-maps.json')
+    function loadRadarOverlay() {
+      fetch(API + '/api/radar/bounds')
         .then(function(r) { return r.json(); })
-        .then(function(data) {
-          var frames = data.radar && data.radar.past;
-          if (!frames || !frames.length) return;
-          var latest = frames[frames.length - 1];
-          var tileUrl = data.host + latest.path + '/256/{z}/{x}/{y}/6/1_0.png';
-          if (rainLayer) map.removeLayer(rainLayer);
-          rainLayer = L.tileLayer(tileUrl, {
-            opacity: 0.6,
-            maxZoom: 18,
-            attribution: '© RainViewer'
-          });
-          if (rainLayerOnMap) rainLayer.addTo(map);
+        .then(function(bounds) {
+          var url = API + '/api/radar/latest.png?t=' + Date.now();
+          if (radarOverlay) map.removeLayer(radarOverlay);
+          radarOverlay = L.imageOverlay(url, bounds, { opacity: 0.7, attribution: '© MeteoSchweiz' });
+          if (radarOnMap) radarOverlay.addTo(map);
         })
-        .catch(function(e) { console.warn('RainViewer:', e); });
+        .catch(function(e) { console.warn('Radar-Overlay:', e); });
     }
-    loadRainLayer();
-    setInterval(loadRainLayer, 5 * 60 * 1000); // alle 5 Min aktualisieren
+    loadRadarOverlay();
+    setInterval(loadRadarOverlay, 5 * 60 * 1000); // alle 5 Min aktualisieren
 
     var LayerToggle = L.Control.extend({
       options: { position: 'topright' },
@@ -317,11 +309,11 @@
     new LayerToggle().addTo(map);
     setTimeout(function() {
       document.getElementById('toggleRain').addEventListener('change', function(e) {
-        rainLayerOnMap = e.target.checked;
+        radarOnMap = e.target.checked;
         if (e.target.checked) {
-          if (rainLayer) rainLayer.addTo(map);
+          if (radarOverlay) radarOverlay.addTo(map);
         } else {
-          if (rainLayer) map.removeLayer(rainLayer);
+          if (radarOverlay) map.removeLayer(radarOverlay);
         }
       });
     }, 50);
