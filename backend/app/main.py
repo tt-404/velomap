@@ -48,7 +48,7 @@ async def lifespan(app: FastAPI):
     shutdown_scheduler()
 
 
-app = FastAPI(title="Velo-Zürich Monitor", lifespan=lifespan)
+app = FastAPI(title="Live Opendata Map Zürich", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

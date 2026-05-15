@@ -46,7 +46,7 @@ def yearly_csv_url(year: int) -> str:
     )
 
 
-_NOMINATIM_UA = "velo-zh-monitor/1.0 (github.com/tt-404/velomap)"
+_NOMINATIM_UA = "live-opendata-map/1.0 (github.com/tt-404/live-opendata-map)"
 
 
 def reverse_geocode_street(lat: float, lon: float) -> str | None:

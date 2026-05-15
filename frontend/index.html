@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<title>Velo-Zürich Monitor</title>
+<title>Live Opendata Map Zürich</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter+Tight:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -251,7 +251,7 @@
 <body>
 <div id="app">
   <header>
-    <h1>🚴 Velo-Zürich Monitor</h1>
+    <h1>Live Opendata Map Zürich</h1>
     <div class="stats">
       <span><span class="dot-live"></span><span id="status">Lade…</span></span>
     </div>
@@ -285,6 +285,7 @@
   var stations = [];
   var stationsById = {};
   var stationMarkers = {};
+  var veloOnMap = true;
   var snapshotsCache = new Map();
   var timeSlots = [];
   var currentIdx = 0;
@@ -668,6 +669,11 @@
         div.innerHTML =
           '<strong>Layer</strong>' +
           '<label>' +
+            '<input type="checkbox" id="toggleVelo" checked>' +
+            '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#d94a1f;border:1.5px solid #1a1c20"></span>' +
+            '<span>Velo</span>' +
+          '</label>' +
+          '<label>' +
             '<input type="checkbox" id="toggleRain">' +
             '<span class="rain-icon"></span>' +
             '<span>Regen-Radar</span>' +
@@ -698,6 +704,18 @@
     });
     new LayerToggle().addTo(map);
     setTimeout(function() {
+      document.getElementById('toggleVelo').addEventListener('change', function(e) {
+        veloOnMap = e.target.checked;
+        Object.keys(stationMarkers).forEach(function(id) {
+          var m = stationMarkers[id];
+          if (veloOnMap) {
+            m.addTo(map);
+          } else {
+            map.removeLayer(m);
+          }
+        });
+      });
+
       document.getElementById('toggleRain').addEventListener('change', function(e) {
         radarOnMap = e.target.checked;
         if (e.target.checked) {
@@ -789,7 +807,7 @@
         stationsById[st.id] = st;
         var m = L.circleMarker([st.lat, st.lon], {
           radius: 8, color: '#1a1c20', weight: 1.5, fillColor: '#999', fillOpacity: 0.9
-        }).addTo(map);
+        });
 
         m.bindTooltip(st.street_name || st.name || ('Station ' + st.id), {
           className: 'station-tooltip',
@@ -803,6 +821,7 @@
           openStationPopup(map, m, st);
         });
 
+        if (veloOnMap) m.addTo(map);
         stationMarkers[st.id] = m;
       });
 

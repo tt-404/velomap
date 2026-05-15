@@ -15,7 +15,7 @@ from .db import ParkingGarage, ParkingReading, get_session
 log = logging.getLogger("parking")
 
 _RSS_URL = "https://www.pls-zh.ch/plsFeed/rss"
-_NOMINATIM_UA = "velo-zh-monitor/1.0 (github.com/tt-404/velomap)"
+_NOMINATIM_UA = "live-opendata-map/1.0 (github.com/tt-404/live-opendata-map)"
 _NS = {"dc": "http://purl.org/dc/elements/1.1/"}
 
 
