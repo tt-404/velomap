@@ -15,7 +15,10 @@ log = logging.getLogger("water")
 _BASE = "https://api.existenz.ch/apiv1/hydro"
 
 # Kanton-Zürich-Stationen (gefiltert via Bounding-Box)
-STATION_IDS = ["2099", "2176", "2209", "2082", "2081", "2044", "2132", "2415", "2392"]
+STATION_IDS = [
+    "2099", "2176", "2209", "2082", "2081", "2044", "2132", "2415", "2392",
+    "2014", "2125", "2126", "2288", "520",
+]
 _LOC_PARAM = ",".join(STATION_IDS)
 
 
