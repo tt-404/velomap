@@ -945,8 +945,12 @@
     });
 
     // === Stationen laden und Marker setzen ===
-    fetch(API + '/api/stations').then(function(r) { return r.json(); }).then(function(results) {
-      stations = results;
+    Promise.all([
+      fetch(API + '/api/stations').then(function(r) { return r.json(); }),
+      fetch(API + '/api/range').then(function(r) { return r.json(); }).catch(function() { return {}; })
+    ]).then(function(results) {
+      stations = results[0];
+      var dataRange = results[1];
 
       stations.forEach(function(st) {
         stationsById[st.id] = st;
@@ -970,7 +974,7 @@
         stationMarkers[st.id] = m;
       });
 
-      buildTimeline();
+      buildTimeline(dataRange.max ? new Date(dataRange.max) : null);
       render(currentIdx);
       updateStatus();
     }).catch(function(e) {
@@ -988,12 +992,22 @@
       ).openPopup();
     }
 
-    function buildTimeline() {
+    function buildTimeline(dataMax) {
       var now = new Date();
-      now.setMinutes(Math.floor(now.getMinutes() / 15) * 15, 0, 0);
+      // Zeitachse endet beim neuesten Datenpunkt (falls >15min veraltet),
+      // sonst bei der aktuellen Zeit – verhindert "Nulldaten-Zone" nach CSV-Ende
+      var end = now;
+      if (dataMax && (now - dataMax) > 15 * 60 * 1000) {
+        // Auf 15-Min-Raster abrunden
+        dataMax.setSeconds(0, 0);
+        dataMax.setMinutes(Math.floor(dataMax.getMinutes() / 15) * 15);
+        end = dataMax;
+      } else {
+        end.setMinutes(Math.floor(end.getMinutes() / 15) * 15, 0, 0);
+      }
       timeSlots = [];
       for (var i = 7 * 96 - 1; i >= 0; i--) {
-        timeSlots.push(new Date(now.getTime() - i * 15 * 60 * 1000));
+        timeSlots.push(new Date(end.getTime() - i * 15 * 60 * 1000));
       }
       var slider = document.getElementById('slider');
       slider.max = timeSlots.length - 1;
