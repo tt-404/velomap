@@ -8,6 +8,7 @@ from .ingest import run_ingest
 from .miv import run_miv_ingest
 from .parking import run_parking_ingest
 from .radar import run_radar_ingest
+from .water import run_water_ingest
 
 log = logging.getLogger("scheduler")
 
@@ -21,6 +22,15 @@ def _velo_job():
         log.info("Scheduler: Velo-Ingest beendet – %s", res)
     except Exception as e:
         log.exception("Scheduler: Velo-Ingest fehlgeschlagen: %s", e)
+
+
+def _water_job():
+    log.info("Scheduler: starte Wasser-Ingest")
+    try:
+        res = run_water_ingest(initial=False)
+        log.info("Scheduler: Wasser-Ingest beendet – %s", res)
+    except Exception as e:
+        log.exception("Scheduler: Wasser-Ingest fehlgeschlagen: %s", e)
 
 
 def _miv_job():
@@ -70,9 +80,12 @@ def start_scheduler() -> BackgroundScheduler:
     # MIV: täglich um 07:30 (CSV wird morgens aktualisiert)
     sched.add_job(_miv_job, CronTrigger(hour=7, minute=30), id="miv_ingest")
 
+    # Wasser: alle 10 Min (BAFU-Auflösung)
+    sched.add_job(_water_job, CronTrigger(minute="5,15,25,35,45,55"), id="water_ingest")
+
     sched.start()
     _scheduler = sched
-    log.info("Scheduler gestartet (Velo: stündlich, Radar: 10 Min, Parking: 2 Min, MIV: täglich)")
+    log.info("Scheduler gestartet (Velo: stündlich, Radar: 10 Min, Parking: 2 Min, MIV: täglich, Wasser: 10 Min)")
     return sched
 
 

@@ -92,6 +92,35 @@ class Precip(Base):
     )
 
 
+class WaterStation(Base):
+    """Hydrologische Messstation (BAFU via api.existenz.ch)."""
+    __tablename__ = "water_stations"
+    id = Column(String, primary_key=True)   # BAFU-Stations-ID, z.B. "2099"
+    name = Column(String)                    # z.B. "Zürich Unterhard"
+    water_body = Column(String)              # z.B. "Limmat"
+    water_type = Column(String)              # "river" | "lake"
+    lat = Column(Float)
+    lon = Column(Float)
+    readings = relationship("WaterReading", back_populates="station")
+
+
+class WaterReading(Base):
+    """10-Minuten-Messwert (Temperatur und/oder Wasserstand)."""
+    __tablename__ = "water_readings"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    station_id = Column(String, ForeignKey("water_stations.id"), nullable=False)
+    ts = Column(DateTime, nullable=False)   # UTC
+    temperature = Column(Float)             # °C (kann None sein)
+    height = Column(Float)                  # cm (kann None sein)
+    station = relationship("WaterStation", back_populates="readings")
+
+    __table_args__ = (
+        Index("ix_water_ts", "ts"),
+        Index("ix_water_station_ts", "station_id", "ts"),
+        Index("uq_water_natural", "station_id", "ts", unique=True),
+    )
+
+
 class MivStation(Base):
     """MIV-Zählstelle (Strassenverkehr, Stadt Zürich)."""
     __tablename__ = "miv_stations"

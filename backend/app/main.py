@@ -17,6 +17,7 @@ from sqlalchemy import func, select
 from .db import Count, Precip, Station, get_session, init_db
 from .ingest import run_ingest
 from .miv import get_miv_snapshot, get_miv_stations, run_miv_ingest
+from .water import get_water_history, get_water_snapshot, get_water_stations, run_water_ingest
 from .parking import get_current_parking, run_parking_ingest
 from .radar import ccs4_bounds_wgs84, render_radar_png_at, run_radar_ingest
 from .scheduler import shutdown_scheduler, start_scheduler
@@ -41,6 +42,7 @@ async def lifespan(app: FastAPI):
     import threading
     threading.Thread(target=run_parking_ingest, daemon=True).start()
     threading.Thread(target=lambda: run_miv_ingest(initial=False), daemon=True).start()
+    threading.Thread(target=lambda: run_water_ingest(initial=True), daemon=True).start()
     start_scheduler()
     yield
     shutdown_scheduler()
@@ -265,6 +267,35 @@ def trigger_ingest(background: BackgroundTasks, initial: bool = False):
     """Manueller Trigger für Velo-Ingest."""
     background.add_task(run_ingest, initial=initial)
     return {"status": "scheduled", "type": "velo", "initial": initial}
+
+
+@app.get("/api/water/stations")
+def water_stations():
+    """Hydrologische Messstationen im Kanton Zürich."""
+    return get_water_stations()
+
+
+@app.get("/api/water/snapshot")
+def water_snapshot(at: str = Query(...), window: int = Query(1800)):
+    """Temperatur + Wasserstand aller Stationen zu einem Zeitpunkt (Default ±15 Min)."""
+    try:
+        t_at = isoparse(at)
+    except Exception:
+        raise HTTPException(400, "Ungültiger Zeitpunkt")
+    return get_water_snapshot(t_at, window_seconds=window)
+
+
+@app.get("/api/water/history/{station_id}")
+def water_history(station_id: str, days: int = Query(7)):
+    """7-Tage-Verlauf einer Wasserstation (für Chart)."""
+    return get_water_history(station_id, days=days)
+
+
+@app.post("/api/ingest/water")
+def trigger_water(background: BackgroundTasks, initial: bool = False):
+    """Manueller Trigger für Wasser-Ingest."""
+    background.add_task(run_water_ingest, initial=initial)
+    return {"status": "scheduled", "type": "water", "initial": initial}
 
 
 @app.get("/api/miv/stations")
