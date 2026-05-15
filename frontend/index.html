@@ -285,7 +285,7 @@
           var frames = data.radar && data.radar.past;
           if (!frames || !frames.length) return;
           var latest = frames[frames.length - 1];
-          var tileUrl = data.host + latest.path + '/256/{z}/{x}/{y}/2/1_1.png';
+          var tileUrl = data.host + latest.path + '/256/{z}/{x}/{y}/6/1_0.png';
           if (rainLayer) map.removeLayer(rainLayer);
           rainLayer = L.tileLayer(tileUrl, {
             opacity: 0.6,
