@@ -446,8 +446,8 @@
     var parkingSnapDebounce = null;
 
     function _parkingIsHistorical() {
-      var ts = timeSlots[currentIdx];
-      return ts && (new Date() - ts) >= 5 * 60 * 1000;
+      // Historisch = Slider nicht am neuesten (rechtesten) Slot
+      return timeSlots.length > 0 && currentIdx < timeSlots.length - 1;
     }
 
     function refreshParking() {
@@ -496,8 +496,7 @@
       if (!parkingOnMap) return;
       // Marker noch nicht geladen → zuerst Live-Daten holen
       if (Object.keys(parkingMarkers).length === 0) { refreshParking(); return; }
-      var now = new Date();
-      if ((now - ts) < 5 * 60 * 1000) return; // Aktuell → Timer übernimmt
+      if (!_parkingIsHistorical()) return; // Aktuell → Timer übernimmt
       // Historisch: Icons via Snapshot aktualisieren
       clearTimeout(parkingSnapDebounce);
       parkingSnapDebounce = setTimeout(function() {
