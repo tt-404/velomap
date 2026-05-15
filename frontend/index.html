@@ -182,6 +182,12 @@
     width: 14px; height: 14px; border-radius: 50%;
     background: #7c3aed; color: #fff; font-size: 8px; font-weight: 700;
   }
+  .layer-toggle .group-header {
+    font-size: 10px; font-weight: 700; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 4px 0 2px 0;
+  }
+  .layer-toggle label.sub { padding-left: 10px; }
 
   /* === MIV Marker === */
   .miv-div-icon {
@@ -524,7 +530,7 @@
       kantonal: L.layerGroup(),
       kommunal: L.layerGroup()
     };
-    var mivGroupColors = { national: '#dc2626', kantonal: '#7c3aed', kommunal: '#a855f7' };
+    var mivGroupColors = { national: '#dc2626', kantonal: '#2563eb', kommunal: '#16a34a' };
     var mivSnapshotCache = new Map();
     var mivDebounce = null;
 
@@ -782,20 +788,21 @@
             '<span class="parking-icon">P</span>' +
             '<span>Parkhäuser <span id="parkingTs" style="font-size:9px;color:var(--muted);font-weight:400"></span></span>' +
           '</label>' +
-          '<label>' +
+          '<div class="group-header">MIV</div>' +
+          '<label class="sub">' +
             '<input type="checkbox" id="toggleMivNational">' +
             '<span class="miv-icon" style="background:#dc2626">N</span>' +
-            '<span>MIV National</span>' +
+            '<span>National</span>' +
           '</label>' +
-          '<label>' +
+          '<label class="sub">' +
             '<input type="checkbox" id="toggleMivKantonal">' +
-            '<span class="miv-icon" style="background:#7c3aed">K</span>' +
-            '<span>MIV Kantonal</span>' +
+            '<span class="miv-icon" style="background:#2563eb">K</span>' +
+            '<span>Kantonal</span>' +
           '</label>' +
-          '<label>' +
+          '<label class="sub">' +
             '<input type="checkbox" id="toggleMivKommunal">' +
-            '<span class="miv-icon" style="background:#a855f7">G</span>' +
-            '<span>MIV Kommunal</span>' +
+            '<span class="miv-icon" style="background:#16a34a">G</span>' +
+            '<span>Kommunal</span>' +
           '</label>' +
           '<label>' +
             '<input type="checkbox" id="toggleWaterTemp">' +
