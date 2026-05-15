@@ -480,32 +480,49 @@
       }
     }
 
+    function _fetchLive(then) {
+      fetch(API + '/api/parking', { cache: 'no-store' })
+        .then(function(r) { return r.json(); })
+        .then(then)
+        .catch(function(e) { console.warn('Parking live:', e); });
+    }
+
     function updateParkingLayer(ts) {
       if (!parkingOnMap) return;
       clearTimeout(parkingDebounce);
       parkingDebounce = setTimeout(function() {
+        var noMarkers = Object.keys(parkingMarkers).length === 0;
         var now = new Date();
-        var isLive = (now - ts) < 5 * 60 * 1000;  // weniger als 5 Min zurück → Live
-        if (isLive) {
-          fetch(API + '/api/parking', { cache: 'no-store' })
-            .then(function(r) { return r.json(); })
-            .then(_applyParkingGarages)
-            .catch(function(e) { console.warn('Parking live:', e); });
+        var isLive = (now - ts) < 5 * 60 * 1000;
+
+        if (isLive || noMarkers) {
+          // Live-Daten holen (auch beim ersten Load immer, egal wo Slider steht)
+          _fetchLive(function(garages) {
+            _applyParkingGarages(garages, false);
+            // Wenn Slider auf historischer Zeit: danach noch Snapshot drüberlagern
+            if (!isLive) _applySnapshot(ts);
+          });
         } else {
-          var key = ts.toISOString();
-          if (parkingSnapCache.has(key)) {
-            _applyParkingGarages(parkingSnapCache.get(key));
-            return;
-          }
-          fetch(API + '/api/parking/snapshot?at=' + encodeURIComponent(key))
-            .then(function(r) { return r.json(); })
-            .then(function(garages) {
-              parkingSnapCache.set(key, garages);
-              _applyParkingGarages(garages, true);
-            })
-            .catch(function(e) { console.warn('Parking snapshot:', e); });
+          _applySnapshot(ts);
         }
       }, 150);
+    }
+
+    function _applySnapshot(ts) {
+      var key = ts.toISOString();
+      if (parkingSnapCache.has(key)) {
+        var cached = parkingSnapCache.get(key);
+        _applyParkingGarages(cached, cached.length > 0);
+        return;
+      }
+      fetch(API + '/api/parking/snapshot?at=' + encodeURIComponent(key))
+        .then(function(r) { return r.json(); })
+        .then(function(garages) {
+          parkingSnapCache.set(key, garages);
+          // Nur ausgrauen wenn wir tatsächlich Daten haben (sonst Live-Stand behalten)
+          _applyParkingGarages(garages, garages.length > 0);
+        })
+        .catch(function(e) { console.warn('Parking snapshot:', e); });
     }
 
     function refreshParking() {
