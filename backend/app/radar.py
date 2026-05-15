@@ -60,8 +60,12 @@ _COLORMAP = [
     (50.0, (255,   0,   0, 230)),
 ]
 
-# Cache für das zuletzt gerenderte PNG
-_png_cache: dict = {"href": None, "png": None}
+# Zeitindex aller verfügbaren RZC-Assets {datetime → href}
+_stac_index: dict = {"built_at": None, "index": {}}
+_STAC_INDEX_TTL = 600  # 10 Min
+
+# PNG-Render-Cache {href → bytes}, max 80 Einträge (~14 Stunden bei 5-Min-Takt)
+_png_render_cache: dict[str, bytes] = {}
 
 
 def ccs4_bounds_wgs84() -> list:
@@ -74,8 +78,12 @@ def ccs4_bounds_wgs84() -> list:
     return [[lr_lat, ul_lon], [ul_lat, lr_lon]]
 
 
-def latest_rzc_item_url() -> str | None:
-    """Findet das aktuellste RZC-Asset (instantane mm/h, 5-Min-Takt)."""
+def build_rzc_time_index() -> dict[datetime, str]:
+    """Baut einen Zeitindex {datetime → href} aller RZC-Assets auf (10-Min-Cache)."""
+    now = datetime.now(timezone.utc).timestamp()
+    if _stac_index["built_at"] and now - _stac_index["built_at"] < _STAC_INDEX_TTL:
+        return _stac_index["index"]
+
     url = f"{STAC_BASE}/collections/{COLLECTION}/items?limit=20"
     with httpx.Client(timeout=30.0) as client:
         r = client.get(url)
@@ -83,46 +91,49 @@ def latest_rzc_item_url() -> str | None:
         data = r.json()
 
     pattern = re.compile(r"^rzc\d+vl\.", re.IGNORECASE)
-    best_key: str | None = None
-    best_href: str | None = None
+    index: dict[datetime, str] = {}
     for feat in data.get("features", []):
         for key, asset in feat.get("assets", {}).items():
             if pattern.match(key):
-                if best_key is None or key > best_key:
-                    best_key = key
-                    best_href = asset.get("href")
+                ts = parse_filename_timestamp(asset.get("href", ""))
+                if ts:
+                    index[ts] = asset["href"]
 
-    if best_href:
-        log.info("STAC: neuestes RZC-Asset: %s", best_key)
-    else:
-        log.warning("STAC: kein RZC-Asset gefunden")
-    return best_href
+    _stac_index["built_at"] = now
+    _stac_index["index"] = index
+    log.info("RZC-Zeitindex aufgebaut: %d Einträge", len(index))
+    return index
 
 
-def render_radar_png() -> bytes | None:
-    """Rendert das aktuellste RZC-Bild als RGBA-PNG mit Niederschlags-Farbskala."""
-    href = latest_rzc_item_url()
+def find_rzc_for_time(ts: datetime) -> str | None:
+    """Findet das RZC-Asset am nächsten zum Zeitpunkt (max. 30 Min Abstand)."""
+    index = build_rzc_time_index()
+    if not index:
+        return None
+    ts_utc = ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts
+    closest = min(index.keys(), key=lambda t: abs((t - ts_utc).total_seconds()))
+    if abs((closest - ts_utc).total_seconds()) > 1800:
+        return None
+    return index[closest]
+
+
+def render_radar_png_at(ts: datetime) -> bytes | None:
+    """Rendert das Radar-PNG zum angegebenen Zeitpunkt (gecacht per Asset-URL)."""
+    href = find_rzc_for_time(ts)
     if not href:
-        return _png_cache.get("png")
-
-    if _png_cache["href"] == href and _png_cache["png"]:
-        return _png_cache["png"]
-
+        return None
+    if href in _png_render_cache:
+        return _png_render_cache[href]
     try:
         h5_bytes = download_radar_file(href)
-    except Exception as e:
-        log.error("Radar-PNG: Download fehlgeschlagen: %s", e)
-        return _png_cache.get("png")
-
-    try:
         png_bytes = _h5_to_png(h5_bytes)
     except Exception as e:
-        log.error("Radar-PNG: Rendering fehlgeschlagen: %s", e)
-        return _png_cache.get("png")
-
-    _png_cache["href"] = href
-    _png_cache["png"] = png_bytes
-    log.info("Radar-PNG generiert: %d bytes", len(png_bytes))
+        log.error("Radar-PNG: Fehler für %s: %s", href, e)
+        return None
+    if len(_png_render_cache) >= 80:
+        del _png_render_cache[next(iter(_png_render_cache))]
+    _png_render_cache[href] = png_bytes
+    log.info("Radar-PNG gerendert: %s → %d bytes", href.rsplit("/", 1)[-1], len(png_bytes))
     return png_bytes
 
 

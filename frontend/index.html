@@ -276,20 +276,25 @@
     // === MeteoSwiss Radar-Overlay (OpenData RZC via Backend) ===
     var radarOverlay = null;
     var radarOnMap = false;
+    var radarBounds = null;
+    var radarDebounce = null;
 
-    function loadRadarOverlay() {
-      fetch(API + '/api/radar/bounds')
-        .then(function(r) { return r.json(); })
-        .then(function(bounds) {
-          var url = API + '/api/radar/latest.png?t=' + Date.now();
-          if (radarOverlay) map.removeLayer(radarOverlay);
-          radarOverlay = L.imageOverlay(url, bounds, { opacity: 0.7, attribution: '© MeteoSchweiz' });
-          if (radarOnMap) radarOverlay.addTo(map);
-        })
-        .catch(function(e) { console.warn('Radar-Overlay:', e); });
+    // Bounds einmalig laden
+    fetch(API + '/api/radar/bounds')
+      .then(function(r) { return r.json(); })
+      .then(function(b) { radarBounds = b; })
+      .catch(function(e) { console.warn('Radar-Bounds:', e); });
+
+    function updateRadarOverlay(ts) {
+      if (!radarOnMap || !radarBounds) return;
+      clearTimeout(radarDebounce);
+      radarDebounce = setTimeout(function() {
+        var url = API + '/api/radar/image.png?at=' + encodeURIComponent(ts.toISOString());
+        if (radarOverlay) map.removeLayer(radarOverlay);
+        radarOverlay = L.imageOverlay(url, radarBounds, { opacity: 0.7, attribution: '© MeteoSchweiz' });
+        radarOverlay.addTo(map);
+      }, 300);
     }
-    loadRadarOverlay();
-    setInterval(loadRadarOverlay, 5 * 60 * 1000); // alle 5 Min aktualisieren
 
     var LayerToggle = L.Control.extend({
       options: { position: 'topright' },
@@ -311,7 +316,7 @@
       document.getElementById('toggleRain').addEventListener('change', function(e) {
         radarOnMap = e.target.checked;
         if (e.target.checked) {
-          if (radarOverlay) radarOverlay.addTo(map);
+          updateRadarOverlay(timeSlots[currentIdx]);
         } else {
           if (radarOverlay) map.removeLayer(radarOverlay);
         }
@@ -429,6 +434,8 @@
           weekday: 'short', day: '2-digit', month: '2-digit',
           hour: '2-digit', minute: '2-digit'
         });
+
+      updateRadarOverlay(ts);
 
       fetchSnapshot(ts).then(function(snap) {
         Object.keys(stationMarkers).forEach(function(idStr) {

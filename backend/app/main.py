@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 
 from .db import Count, Precip, Station, get_session, init_db
 from .ingest import run_ingest
-from .radar import ccs4_bounds_wgs84, render_radar_png, run_radar_ingest
+from .radar import ccs4_bounds_wgs84, render_radar_png_at, run_radar_ingest
 from .scheduler import shutdown_scheduler, start_scheduler
 
 logging.basicConfig(level=logging.INFO,
@@ -274,12 +274,16 @@ def radar_bounds():
     return ccs4_bounds_wgs84()
 
 
-@app.get("/api/radar/latest.png")
-def radar_latest_png():
-    """Aktuellstes RZC-Radar als RGBA-PNG (MeteoSwiss OpenData)."""
-    png = render_radar_png()
+@app.get("/api/radar/image.png")
+def radar_image_png(at: str = Query(None)):
+    """RZC-Radar als RGBA-PNG zum angegebenen Zeitpunkt (MeteoSwiss OpenData)."""
+    try:
+        ts = isoparse(at) if at else datetime.now(timezone.utc)
+    except Exception:
+        raise HTTPException(400, "Ungültiger Zeitpunkt")
+    png = render_radar_png_at(ts)
     if not png:
-        raise HTTPException(503, "Kein Radar-Bild verfügbar")
+        raise HTTPException(503, "Kein Radar-Bild für diesen Zeitpunkt verfügbar")
     return Response(
         content=png,
         media_type="image/png",
