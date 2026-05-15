@@ -212,6 +212,27 @@
   }
   .popup-parking-status.open  { background: #dcfce7; color: #166534; }
   .popup-parking-status.closed { background: #fee2e2; color: #991b1b; }
+
+  /* === Water Layer === */
+  .layer-toggle .water-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #0ea5e9; color: #fff; font-size: 9px;
+  }
+  .water-chart-wrap {
+    padding: 8px 14px 12px;
+    border-top: 1px solid var(--border);
+  }
+  .water-chart-label {
+    font-size: 10px; color: var(--muted); margin-bottom: 4px;
+    display: flex; gap: 12px;
+  }
+  .water-chart-label span { display: flex; align-items: center; gap: 4px; }
+  .water-chart-label .swatch {
+    width: 20px; height: 3px; border-radius: 2px; display: inline-block;
+  }
+  .water-chart-wrap svg { display: block; width: 100%; }
+
   .leaflet-control-attribution {
     background: rgba(255,255,255,0.9) !important; color: var(--muted) !important;
     font-size: 9px !important;
@@ -470,6 +491,176 @@
       }, 300);
     }
 
+    // === Wasser-Layer ===
+    var waterStations = [];
+    var waterStationsById = {};
+    var waterTempOnMap = false;
+    var waterLevelOnMap = false;
+    var waterTempGroup = L.layerGroup();
+    var waterLevelGroup = L.layerGroup();
+    var waterSnapCache = new Map();
+    var waterDebounce = null;
+
+    function waterTempColor(t) {
+      if (t === null) return '#94a3b8';
+      if (t >= 20) return '#ef4444';
+      if (t >= 15) return '#f97316';
+      if (t >= 10) return '#f59e0b';
+      if (t >= 5)  return '#38bdf8';
+      return '#818cf8';
+    }
+    function waterLevelColor(h) {
+      if (h === null) return '#94a3b8';
+      return '#0ea5e9';
+    }
+
+    function buildWaterChart(history, currentTs) {
+      var W = 260, H = 80;
+      if (!history || history.length < 2) return '<p style="color:var(--muted);font-size:11px;padding:4px 0">Keine Verlaufsdaten</p>';
+      var tsMin = new Date(history[0].ts).getTime();
+      var tsMax = new Date(history[history.length - 1].ts).getTime();
+      var tsRange = tsMax - tsMin || 1;
+      function xFor(ts) { return ((new Date(ts).getTime() - tsMin) / tsRange * W).toFixed(1); }
+
+      var tempPts = history.filter(function(h) { return h.temperature !== null; });
+      var levelPts = history.filter(function(h) { return h.height !== null; });
+
+      var svgParts = ['<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="height:80px">'];
+
+      // Temperatur-Linie
+      if (tempPts.length > 1) {
+        var tMin = Math.min.apply(null, tempPts.map(function(h) { return h.temperature; }));
+        var tMax = Math.max.apply(null, tempPts.map(function(h) { return h.temperature; }));
+        var tRange = tMax - tMin || 1;
+        var tPath = tempPts.map(function(h, i) {
+          var x = xFor(h.ts);
+          var y = (H - ((h.temperature - tMin) / tRange * (H - 8) + 4)).toFixed(1);
+          return (i === 0 ? 'M' : 'L') + x + ',' + y;
+        }).join(' ');
+        svgParts.push('<path d="' + tPath + '" stroke="#f97316" stroke-width="1.5" fill="none" opacity="0.9"/>');
+      }
+
+      // Wasserstand-Linie
+      if (levelPts.length > 1) {
+        var lMin = Math.min.apply(null, levelPts.map(function(h) { return h.height; }));
+        var lMax = Math.max.apply(null, levelPts.map(function(h) { return h.height; }));
+        var lRange = lMax - lMin || 1;
+        var lPath = levelPts.map(function(h, i) {
+          var x = xFor(h.ts);
+          var y = (H - ((h.height - lMin) / lRange * (H - 8) + 4)).toFixed(1);
+          return (i === 0 ? 'M' : 'L') + x + ',' + y;
+        }).join(' ');
+        svgParts.push('<path d="' + lPath + '" stroke="#0ea5e9" stroke-width="1.5" fill="none" opacity="0.9"/>');
+      }
+
+      // Aktuelle-Zeit-Markierung
+      var cx = ((currentTs.getTime() - tsMin) / tsRange * W).toFixed(1);
+      if (cx >= 0 && cx <= W) {
+        svgParts.push('<line x1="' + cx + '" y1="0" x2="' + cx + '" y2="' + H + '" stroke="#d94a1f" stroke-width="1.5" stroke-dasharray="3,2"/>');
+      }
+
+      svgParts.push('</svg>');
+      return svgParts.join('');
+    }
+
+    function buildWaterPopup(st, snap, currentTs, history) {
+      var temp = snap ? snap.temperature : null;
+      var height = snap ? snap.height : null;
+      var ts = snap ? new Date(snap.ts).toLocaleString('de-CH') : '–';
+      var tempStr = temp !== null ? temp.toFixed(1) + ' °C' : '–';
+      var heightStr = height !== null ? height.toFixed(0) + ' cm' : '–';
+      var tempCol = waterTempColor(temp);
+      return '<div class="popup-header">' +
+               '<div class="title">' + st.name + '</div>' +
+               '<div class="id">' + st.water_body + ' · ' + (st.water_type === 'lake' ? 'See' : 'Fliessgewässer') + '</div>' +
+             '</div>' +
+             '<div class="popup-body">' +
+               '<div style="display:flex;gap:20px;margin-bottom:4px">' +
+                 '<div><div style="font-size:10px;color:var(--muted)">Temperatur</div>' +
+                   '<span style="font-family:JetBrains Mono,monospace;font-size:20px;font-weight:600;color:' + tempCol + '">' + tempStr + '</span></div>' +
+                 '<div><div style="font-size:10px;color:var(--muted)">Wasserstand</div>' +
+                   '<span style="font-family:JetBrains Mono,monospace;font-size:20px;font-weight:600;color:#0ea5e9">' + heightStr + '</span></div>' +
+               '</div>' +
+               '<div class="ts">' + ts + '</div>' +
+             '</div>' +
+             '<div class="water-chart-wrap">' +
+               '<div class="water-chart-label">' +
+                 '<span><span class="swatch" style="background:#f97316"></span>Temp. (°C)</span>' +
+                 '<span><span class="swatch" style="background:#0ea5e9"></span>Stand (cm)</span>' +
+               '</div>' +
+               (history ? buildWaterChart(history, currentTs) : '<div style="font-size:11px;color:var(--muted)">Lade…</div>') +
+             '</div>';
+    }
+
+    function fetchWaterSnapshot(ts) {
+      var key = ts.toISOString();
+      if (waterSnapCache.has(key)) return Promise.resolve(waterSnapCache.get(key));
+      return fetch(API + '/api/water/snapshot?at=' + encodeURIComponent(key) + '&window=1800')
+        .then(function(r) { return r.json(); })
+        .then(function(rows) {
+          var m = new Map();
+          rows.forEach(function(r) { m.set(r.station_id, r); });
+          waterSnapCache.set(key, m);
+          return m;
+        })
+        .catch(function() { return new Map(); });
+    }
+
+    function _updateWaterGroup(group, snap, mode, ts) {
+      group.clearLayers();
+      waterStations.forEach(function(st) {
+        if (!st.lat || !st.lon) return;
+        var reading = snap.get(st.id);
+        var val = reading ? (mode === 'temp' ? reading.temperature : reading.height) : null;
+        var col = mode === 'temp' ? waterTempColor(val) : waterLevelColor(val);
+        var label = val !== null ? (mode === 'temp' ? val.toFixed(1) : val.toFixed(0)) : '?';
+        var size = label.length > 3 ? 38 : 32;
+        var icon = L.divIcon({
+          className: '',
+          html: '<div class="miv-div-icon" style="width:' + size + 'px;height:20px;font-size:9px;background:' + col + '">' + label + '</div>',
+          iconSize: [size, 20], iconAnchor: [size / 2, 10], popupAnchor: [0, -12]
+        });
+        var m = L.marker([st.lat, st.lon], { icon: icon });
+        var tooltip = st.name + ' · ' + st.water_body;
+        m.bindTooltip(tooltip, { className: 'station-tooltip', direction: 'top', offset: [0, -12] });
+
+        // Popup: öffnen → history nachladen
+        m.on('click', function() {
+          var reading = waterSnapCache.has(ts.toISOString()) ? waterSnapCache.get(ts.toISOString()).get(st.id) : null;
+          m.bindPopup(buildWaterPopup(st, reading, ts, null), { maxWidth: 320, minWidth: 260, closeButton: true }).openPopup();
+          fetch(API + '/api/water/history/' + st.id)
+            .then(function(r) { return r.json(); })
+            .then(function(history) {
+              if (m.isPopupOpen()) {
+                m.setPopupContent(buildWaterPopup(st, reading, ts, history));
+              }
+            });
+        });
+
+        group.addLayer(m);
+      });
+    }
+
+    function updateWaterLayer(ts) {
+      if (!waterTempOnMap && !waterLevelOnMap) return;
+      clearTimeout(waterDebounce);
+      waterDebounce = setTimeout(function() {
+        fetchWaterSnapshot(ts).then(function(snap) {
+          if (waterTempOnMap)  _updateWaterGroup(waterTempGroup, snap, 'temp', ts);
+          if (waterLevelOnMap) _updateWaterGroup(waterLevelGroup, snap, 'level', ts);
+        });
+      }, 300);
+    }
+
+    function _loadWaterStations(cb) {
+      if (waterStations.length > 0) { cb(); return; }
+      fetch(API + '/api/water/stations').then(function(r) { return r.json(); }).then(function(rows) {
+        waterStations = rows;
+        rows.forEach(function(st) { waterStationsById[st.id] = st; });
+        cb();
+      });
+    }
+
     var LayerToggle = L.Control.extend({
       options: { position: 'topright' },
       onAdd: function() {
@@ -490,6 +681,16 @@
             '<input type="checkbox" id="toggleMiv">' +
             '<span class="miv-icon">🚗</span>' +
             '<span>MIV</span>' +
+          '</label>' +
+          '<label>' +
+            '<input type="checkbox" id="toggleWaterTemp">' +
+            '<span class="water-icon">🌡</span>' +
+            '<span>Wassertemp.</span>' +
+          '</label>' +
+          '<label>' +
+            '<input type="checkbox" id="toggleWaterLevel">' +
+            '<span class="water-icon">〜</span>' +
+            '<span>Wasserstand</span>' +
           '</label>';
         L.DomEvent.disableClickPropagation(div);
         return div;
@@ -534,6 +735,28 @@
         } else {
           mivLayerGroup.clearLayers();
           map.removeLayer(mivLayerGroup);
+        }
+      });
+
+      document.getElementById('toggleWaterTemp').addEventListener('change', function(e) {
+        waterTempOnMap = e.target.checked;
+        if (e.target.checked) {
+          waterTempGroup.addTo(map);
+          _loadWaterStations(function() { updateWaterLayer(timeSlots[currentIdx]); });
+        } else {
+          waterTempGroup.clearLayers();
+          map.removeLayer(waterTempGroup);
+        }
+      });
+
+      document.getElementById('toggleWaterLevel').addEventListener('change', function(e) {
+        waterLevelOnMap = e.target.checked;
+        if (e.target.checked) {
+          waterLevelGroup.addTo(map);
+          _loadWaterStations(function() { updateWaterLayer(timeSlots[currentIdx]); });
+        } else {
+          waterLevelGroup.clearLayers();
+          map.removeLayer(waterLevelGroup);
         }
       });
     }, 50);
@@ -652,6 +875,7 @@
 
       updateRadarOverlay(ts);
       updateMivLayer(ts);
+      updateWaterLayer(ts);
 
       fetchSnapshot(ts).then(function(snap) {
         Object.keys(stationMarkers).forEach(function(idStr) {
