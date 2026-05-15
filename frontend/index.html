@@ -445,8 +445,15 @@
     var parkingSnapCache = new Map();
     var parkingSnapDebounce = null;
 
+    function _parkingIsHistorical() {
+      var ts = timeSlots[currentIdx];
+      return ts && (new Date() - ts) >= 5 * 60 * 1000;
+    }
+
     function refreshParking() {
       if (!parkingOnMap) return;
+      // Im historischen Modus kein Live-Update – Icons + Snapshot bleiben erhalten
+      if (_parkingIsHistorical()) return;
       fetch(API + '/api/parking', { cache: 'no-store' })
         .then(function(r) { return r.json(); })
         .then(function(garages) {
@@ -458,21 +465,24 @@
             if (parkingMarkers[g.slug]) {
               var m = parkingMarkers[g.slug];
               m.setIcon(buildParkingIcon(g.free, g.status));
-              m._snapshot = null;  // Live-Update: keinen historischen Wert mehr cachen
               if (m.isPopupOpen()) m.setPopupContent(buildParkingPopup(g, m._history));
             } else {
               var m = L.marker([g.lat, g.lon], { icon: buildParkingIcon(g.free, g.status) });
               m._history = undefined;
+              m._snapshot = undefined;
               m.bindTooltip(g.name, { className: 'station-tooltip', direction: 'top', offset: [0, -14] });
               m.on('click', function() {
-                var cur = m._snapshot || parkingData[g.slug] || g;
+                var cur = (_parkingIsHistorical() && m._snapshot) || parkingData[g.slug] || g;
                 m.unbindPopup();
                 m.bindPopup(buildParkingPopup(cur, m._history), { maxWidth: 320, minWidth: 260, closeButton: true }).openPopup();
                 fetch(API + '/api/parking/history/' + g.slug)
                   .then(function(r) { return r.json(); })
                   .then(function(history) {
                     m._history = history;
-                    if (m.isPopupOpen()) m.setPopupContent(buildParkingPopup(m._snapshot || parkingData[g.slug] || g, history));
+                    if (m.isPopupOpen()) {
+                      var snap = (_parkingIsHistorical() && m._snapshot) || parkingData[g.slug] || g;
+                      m.setPopupContent(buildParkingPopup(snap, history));
+                    }
                   });
               });
               parkingLayerGroup.addLayer(m);
