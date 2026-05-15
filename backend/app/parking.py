@@ -8,9 +8,7 @@ from datetime import datetime, timezone
 from xml.etree import ElementTree as ET
 
 import httpx
-from sqlalchemy import select
-
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy import delete, select
 
 from .db import ParkingGarage, ParkingReading, get_session
 
@@ -100,20 +98,19 @@ def run_parking_ingest() -> dict:
             new_garages.append(garage)
             existing_slugs.add(slug)
 
-        # Neue Garagen in eigener Session upserten (getrennt von Readings)
+        # Neue Garagen in eigener Session upserten
         if new_garages:
             with get_session() as s:
                 for g in new_garages:
                     s.merge(g)
             new_garages.clear()
 
-        # Reading via on_conflict_do_nothing (kein rollback-Bug mehr)
+        # Aktuellen Zustand überschreiben: immer den neuesten Wert speichern.
+        # Parkingdaten brauchen keine Zeitreihe — nur der aktuelle Stand zählt.
         with get_session() as s:
-            stmt = sqlite_insert(ParkingReading).values(
-                garage_slug=slug, ts=ts, free=free, status=status
-            ).on_conflict_do_nothing(index_elements=["garage_slug", "ts"])
-            result = s.execute(stmt)
-            inserted += result.rowcount or 0
+            s.execute(delete(ParkingReading).where(ParkingReading.garage_slug == slug))
+            s.add(ParkingReading(garage_slug=slug, ts=ts, free=free, status=status))
+            inserted += 1
 
     log.info("Parking-Ingest: %d Readings eingefügt", inserted)
     return {"status": "ok", "inserted": inserted}
