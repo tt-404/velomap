@@ -701,7 +701,7 @@
     function fetchWaterSnapshot(ts) {
       var key = ts.toISOString();
       if (waterSnapCache.has(key)) return Promise.resolve(waterSnapCache.get(key));
-      return fetch(API + '/api/water/snapshot?at=' + encodeURIComponent(key) + '&window=1800')
+      return fetch(API + '/api/water/snapshot?at=' + encodeURIComponent(key) + '&window=3600')
         .then(function(r) { return r.json(); })
         .then(function(rows) {
           var m = new Map();
@@ -738,7 +738,12 @@
             .then(function(r) { return r.json(); })
             .then(function(history) {
               if (m.isPopupOpen()) {
-                m.setPopupContent(buildWaterPopup(st, reading, ts, history));
+                // Kein Snapshot-Treffer: neuesten Verlaufswert als Fallback
+                var snap = reading;
+                if (!snap && history && history.length > 0) {
+                  snap = history[history.length - 1];
+                }
+                m.setPopupContent(buildWaterPopup(st, snap, ts, history));
               }
             });
         });
