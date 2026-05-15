@@ -164,6 +164,27 @@ def _bulk_insert(records: list[dict]) -> int:
     return inserted
 
 
+def get_water_latest() -> list[dict]:
+    """Neuester Messwert pro Station (kein Zeitfenster – für Marker-Label-Fallback)."""
+    with get_session() as s:
+        latest_subq = (
+            select(WaterReading.station_id, func.max(WaterReading.ts).label("max_ts"))
+            .group_by(WaterReading.station_id)
+            .subquery()
+        )
+        rows = s.execute(
+            select(WaterReading)
+            .join(latest_subq,
+                  (WaterReading.station_id == latest_subq.c.station_id) &
+                  (WaterReading.ts == latest_subq.c.max_ts))
+        ).scalars().all()
+        return [
+            {"station_id": r.station_id, "ts": r.ts.isoformat(),
+             "temperature": r.temperature, "height": r.height}
+            for r in rows
+        ]
+
+
 def get_water_stations() -> list[dict]:
     with get_session() as s:
         rows = s.execute(select(WaterStation)).scalars().all()

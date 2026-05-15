@@ -17,7 +17,7 @@ from sqlalchemy import func, select
 from .db import Count, Precip, Station, get_session, init_db
 from .ingest import run_ingest
 from .miv import get_miv_snapshot, get_miv_stations, run_miv_ingest
-from .water import get_water_history, get_water_snapshot, get_water_stations, run_water_ingest
+from .water import get_water_history, get_water_latest, get_water_snapshot, get_water_stations, run_water_ingest
 from .parking import get_current_parking, get_parking_history, get_parking_snapshot, run_parking_ingest
 from .radar import ccs4_bounds_wgs84, render_radar_png_at, run_radar_ingest
 from .scheduler import shutdown_scheduler, start_scheduler
@@ -273,6 +273,12 @@ def trigger_ingest(background: BackgroundTasks, initial: bool = False):
 def water_stations():
     """Hydrologische Messstationen im Kanton Zürich."""
     return get_water_stations()
+
+
+@app.get("/api/water/latest")
+def water_latest():
+    """Neuester Messwert pro Station (kein Zeitfenster, für Marker-Fallback)."""
+    return get_water_latest()
 
 
 @app.get("/api/water/snapshot")

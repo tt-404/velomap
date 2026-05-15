@@ -600,6 +600,7 @@
     // === Wasser-Layer ===
     var waterStations = [];
     var waterStationsById = {};
+    var waterLatestById = {};   // station_id → neuester Messwert (Fallback für Marker)
     var waterTempOnMap = false;
     var waterLevelOnMap = false;
     var waterTempGroup = L.layerGroup();
@@ -716,7 +717,7 @@
       group.clearLayers();
       waterStations.forEach(function(st) {
         if (!st.lat || !st.lon) return;
-        var reading = snap.get(st.id);
+        var reading = snap.get(st.id) || waterLatestById[st.id] || null;
         var val = reading ? (mode === 'temp' ? reading.temperature : reading.height) : null;
         var col = mode === 'temp' ? waterTempColor(val) : waterLevelColor(val);
         var label = val !== null ? (mode === 'temp' ? val.toFixed(1) : val.toFixed(0)) : '?';
@@ -765,9 +766,13 @@
 
     function _loadWaterStations(cb) {
       if (waterStations.length > 0) { cb(); return; }
-      fetch(API + '/api/water/stations').then(function(r) { return r.json(); }).then(function(rows) {
-        waterStations = rows;
-        rows.forEach(function(st) { waterStationsById[st.id] = st; });
+      Promise.all([
+        fetch(API + '/api/water/stations').then(function(r) { return r.json(); }),
+        fetch(API + '/api/water/latest').then(function(r) { return r.json(); })
+      ]).then(function(results) {
+        waterStations = results[0];
+        results[0].forEach(function(st) { waterStationsById[st.id] = st; });
+        results[1].forEach(function(r) { waterLatestById[r.station_id] = r; });
         cb();
       });
     }
