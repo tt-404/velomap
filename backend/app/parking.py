@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from xml.etree import ElementTree as ET
 
 import httpx
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 from .db import ParkingGarage, ParkingHistory, ParkingReading, get_session
 
@@ -143,6 +143,37 @@ def get_current_parking() -> list[dict]:
                 "ts": r.ts.isoformat(),
             }
             for g, r in rows
+        ]
+
+
+def get_parking_snapshot(at: datetime) -> list[dict]:
+    """Parkhaus-Zustand zum Zeitpunkt `at` (neuester History-Eintrag ≤ at pro Garage)."""
+    with get_session() as s:
+        subq = (
+            select(
+                ParkingHistory.garage_slug,
+                func.max(ParkingHistory.ts).label("max_ts"),
+            )
+            .where(ParkingHistory.ts <= at)
+            .group_by(ParkingHistory.garage_slug)
+            .subquery()
+        )
+        rows = s.execute(
+            select(ParkingGarage, ParkingHistory)
+            .join(subq, ParkingGarage.slug == subq.c.garage_slug)
+            .join(
+                ParkingHistory,
+                (ParkingHistory.garage_slug == subq.c.garage_slug)
+                & (ParkingHistory.ts == subq.c.max_ts),
+            )
+        ).all()
+        return [
+            {
+                "slug": g.slug, "name": g.name, "address": g.address,
+                "lat": g.lat, "lon": g.lon,
+                "free": h.free, "status": h.status, "ts": h.ts.isoformat(),
+            }
+            for g, h in rows
         ]
 
 
