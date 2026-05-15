@@ -374,6 +374,9 @@ def radar_image_png(at: str = Query(None)):
 if FRONTEND_DIR.exists():
     @app.get("/")
     def root():
-        return FileResponse(FRONTEND_DIR / "index.html")
+        return FileResponse(
+            FRONTEND_DIR / "index.html",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
 
     app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
