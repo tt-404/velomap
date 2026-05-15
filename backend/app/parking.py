@@ -10,6 +10,8 @@ from xml.etree import ElementTree as ET
 import httpx
 from sqlalchemy import select
 
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
 from .db import ParkingGarage, ParkingReading, get_session
 
 log = logging.getLogger("parking")
@@ -98,19 +100,20 @@ def run_parking_ingest() -> dict:
             new_garages.append(garage)
             existing_slugs.add(slug)
 
-        # Reading einfügen
-        with get_session() as s:
-            if new_garages:
+        # Neue Garagen in eigener Session upserten (getrennt von Readings)
+        if new_garages:
+            with get_session() as s:
                 for g in new_garages:
                     s.merge(g)
-                new_garages.clear()
-            reading = ParkingReading(garage_slug=slug, ts=ts, free=free, status=status)
-            try:
-                s.add(reading)
-                s.flush()
-                inserted += 1
-            except Exception:
-                s.rollback()
+            new_garages.clear()
+
+        # Reading via on_conflict_do_nothing (kein rollback-Bug mehr)
+        with get_session() as s:
+            stmt = sqlite_insert(ParkingReading).values(
+                garage_slug=slug, ts=ts, free=free, status=status
+            ).on_conflict_do_nothing(index_elements=["garage_slug", "ts"])
+            result = s.execute(stmt)
+            inserted += result.rowcount or 0
 
     log.info("Parking-Ingest: %d Readings eingefügt", inserted)
     return {"status": "ok", "inserted": inserted}
