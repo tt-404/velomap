@@ -439,11 +439,13 @@
     var parkingSnapCache = new Map();
     var parkingDebounce = null;
 
-    function _applyParkingGarages(garages) {
+    function _applyParkingGarages(garages, greyOutMissing) {
       var tsEl = document.getElementById('parkingTs');
       if (tsEl) tsEl.textContent = new Date().toLocaleTimeString('de-CH');
+      var seen = {};
       garages.forEach(function(g) {
         if (!g.lat || !g.lon) return;
+        seen[g.slug] = true;
         parkingData[g.slug] = g;
         if (parkingMarkers[g.slug]) {
           var m = parkingMarkers[g.slug];
@@ -468,6 +470,14 @@
           parkingMarkers[g.slug] = m;
         }
       });
+      // Garagen ohne Daten zum gewählten Zeitpunkt ausgrauen
+      if (greyOutMissing) {
+        Object.keys(parkingMarkers).forEach(function(slug) {
+          if (!seen[slug]) {
+            parkingMarkers[slug].setIcon(buildParkingIcon(null, 'closed'));
+          }
+        });
+      }
     }
 
     function updateParkingLayer(ts) {
@@ -491,7 +501,7 @@
             .then(function(r) { return r.json(); })
             .then(function(garages) {
               parkingSnapCache.set(key, garages);
-              _applyParkingGarages(garages);
+              _applyParkingGarages(garages, true);
             })
             .catch(function(e) { console.warn('Parking snapshot:', e); });
         }
