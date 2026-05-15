@@ -386,7 +386,31 @@
       });
     }
 
-    function buildParkingPopup(g) {
+    function buildParkingChart(history) {
+      var W = 260, H = 60;
+      if (!history || history.length < 2) return '<p style="color:var(--muted);font-size:11px;padding:4px 0">Keine Verlaufsdaten</p>';
+      var pts = history.filter(function(h) { return h.free !== null; });
+      if (pts.length < 2) return '<p style="color:var(--muted);font-size:11px;padding:4px 0">Keine Verlaufsdaten</p>';
+      var tsMin = new Date(pts[0].ts).getTime();
+      var tsMax = new Date(pts[pts.length - 1].ts).getTime();
+      var tsRange = tsMax - tsMin || 1;
+      var vMin = Math.min.apply(null, pts.map(function(h) { return h.free; }));
+      var vMax = Math.max.apply(null, pts.map(function(h) { return h.free; }));
+      var vRange = vMax - vMin || 1;
+      var path = pts.map(function(h, i) {
+        var x = ((new Date(h.ts).getTime() - tsMin) / tsRange * W).toFixed(1);
+        var y = (H - ((h.free - vMin) / vRange * (H - 8) + 4)).toFixed(1);
+        return (i === 0 ? 'M' : 'L') + x + ',' + y;
+      }).join(' ');
+      // current-time marker = last data point
+      var cx = W.toFixed(1);
+      return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="height:60px">' +
+               '<path d="' + path + '" stroke="#2a8c5a" stroke-width="1.5" fill="none" opacity="0.9"/>' +
+               '<line x1="' + cx + '" y1="0" x2="' + cx + '" y2="' + H + '" stroke="#d94a1f" stroke-width="1.5" stroke-dasharray="3,2"/>' +
+             '</svg>';
+    }
+
+    function buildParkingPopup(g, history) {
       var col = parkingColor(g.free, g.status);
       var statusClass = g.status === 'open' ? 'open' : 'closed';
       var statusLabel = g.status === 'open' ? 'Offen' : 'Geschlossen';
@@ -402,6 +426,12 @@
                '</span>' +
                '<div><span class="popup-parking-status ' + statusClass + '">' + statusLabel + '</span></div>' +
                '<div class="ts">' + ts + '</div>' +
+             '</div>' +
+             '<div class="water-chart-wrap">' +
+               '<div class="water-chart-label">' +
+                 '<span><span class="swatch" style="background:#2a8c5a"></span>Freie Plätze (7 Tage)</span>' +
+               '</div>' +
+               (history !== undefined ? buildParkingChart(history) : '<div style="font-size:11px;color:var(--muted)">Lade…</div>') +
              '</div>';
     }
 
@@ -416,7 +446,15 @@
             if (!g.lat || !g.lon) return;
             var m = L.marker([g.lat, g.lon], { icon: buildParkingIcon(g.free, g.status) });
             m.bindTooltip(g.name, { className: 'station-tooltip', direction: 'top', offset: [0, -14] });
-            m.bindPopup(buildParkingPopup(g), { maxWidth: 300, minWidth: 220, closeButton: true });
+            m.bindPopup(buildParkingPopup(g), { maxWidth: 320, minWidth: 260, closeButton: true });
+            m.on('click', function() {
+              m.bindPopup(buildParkingPopup(g), { maxWidth: 320, minWidth: 260, closeButton: true }).openPopup();
+              fetch(API + '/api/parking/history/' + g.slug)
+                .then(function(r) { return r.json(); })
+                .then(function(history) {
+                  if (m.isPopupOpen()) m.setPopupContent(buildParkingPopup(g, history));
+                });
+            });
             parkingLayerGroup.addLayer(m);
             parkingMarkers[g.slug] = m;
           });

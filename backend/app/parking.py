@@ -10,7 +10,7 @@ from xml.etree import ElementTree as ET
 import httpx
 from sqlalchemy import delete, select
 
-from .db import ParkingGarage, ParkingReading, get_session
+from .db import ParkingGarage, ParkingHistory, ParkingReading, get_session
 
 log = logging.getLogger("parking")
 
@@ -105,9 +105,17 @@ def run_parking_ingest() -> dict:
                     s.merge(g)
             new_garages.clear()
 
-        # Aktuellen Zustand überschreiben: immer den neuesten Wert speichern.
-        # Parkingdaten brauchen keine Zeitreihe — nur der aktuelle Stand zählt.
+        # Aktuellen Zustand überschreiben
         with get_session() as s:
+            prev = s.execute(
+                select(ParkingReading).where(ParkingReading.garage_slug == slug)
+            ).scalar_one_or_none()
+
+            # Verlaufseintrag nur bei Wertänderung (oder erstem Eintrag)
+            if prev is None or prev.free != free or prev.status != status:
+                now_utc = datetime.now(timezone.utc)
+                s.add(ParkingHistory(garage_slug=slug, ts=now_utc, free=free, status=status))
+
             s.execute(delete(ParkingReading).where(ParkingReading.garage_slug == slug))
             s.add(ParkingReading(garage_slug=slug, ts=ts, free=free, status=status))
             inserted += 1
@@ -117,20 +125,11 @@ def run_parking_ingest() -> dict:
 
 
 def get_current_parking() -> list[dict]:
-    """Liefert aktuellste Belegung aller Parkhäuser."""
-    from sqlalchemy import func
+    """Liefert aktuellen Zustand aller Parkhäuser (eine Zeile pro Garage)."""
     with get_session() as s:
-        # Neuester Zeitstempel pro Garage
-        latest_subq = (
-            select(ParkingReading.garage_slug, func.max(ParkingReading.ts).label("max_ts"))
-            .group_by(ParkingReading.garage_slug)
-            .subquery()
-        )
         rows = s.execute(
             select(ParkingGarage, ParkingReading)
             .join(ParkingReading, ParkingGarage.slug == ParkingReading.garage_slug)
-            .join(latest_subq, (ParkingReading.garage_slug == latest_subq.c.garage_slug)
-                  & (ParkingReading.ts == latest_subq.c.max_ts))
         ).all()
         return [
             {
@@ -144,4 +143,20 @@ def get_current_parking() -> list[dict]:
                 "ts": r.ts.isoformat(),
             }
             for g, r in rows
+        ]
+
+
+def get_parking_history(slug: str, days: int = 7) -> list[dict]:
+    """Verlauf der freien Plätze für eine Garage (letzte `days` Tage)."""
+    from datetime import timedelta
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    with get_session() as s:
+        rows = s.execute(
+            select(ParkingHistory)
+            .where(ParkingHistory.garage_slug == slug, ParkingHistory.ts >= since)
+            .order_by(ParkingHistory.ts)
+        ).scalars().all()
+        return [
+            {"ts": r.ts.isoformat(), "free": r.free, "status": r.status}
+            for r in rows
         ]

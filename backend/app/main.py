@@ -18,7 +18,7 @@ from .db import Count, Precip, Station, get_session, init_db
 from .ingest import run_ingest
 from .miv import get_miv_snapshot, get_miv_stations, run_miv_ingest
 from .water import get_water_history, get_water_snapshot, get_water_stations, run_water_ingest
-from .parking import get_current_parking, run_parking_ingest
+from .parking import get_current_parking, get_parking_history, run_parking_ingest
 from .radar import ccs4_bounds_wgs84, render_radar_png_at, run_radar_ingest
 from .scheduler import shutdown_scheduler, start_scheduler
 
@@ -325,6 +325,12 @@ def trigger_miv(background: BackgroundTasks, initial: bool = False):
 def parking():
     """Aktuellste Belegung aller Parkhäuser im PLS Zürich."""
     return get_current_parking()
+
+
+@app.get("/api/parking/history/{slug}")
+def parking_history(slug: str, days: int = Query(7)):
+    """7-Tage-Verlauf der freien Plätze für ein Parkhaus."""
+    return get_parking_history(slug, days=days)
 
 
 @app.post("/api/ingest/parking")

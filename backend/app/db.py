@@ -162,18 +162,28 @@ class ParkingGarage(Base):
 
 
 class ParkingReading(Base):
-    """Aktuelle Belegung eines Parkhauses."""
+    """Aktueller Zustand eines Parkhauses (wird bei jedem Ingest überschrieben)."""
     __tablename__ = "parking_readings"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    garage_slug = Column(String, ForeignKey("parking_garages.slug"), nullable=False)
+    garage_slug = Column(String, ForeignKey("parking_garages.slug"), nullable=False, unique=True)
     ts = Column(DateTime, nullable=False)   # UTC, aus dc:date
-    free = Column(Integer)                   # freie Plätze
-    status = Column(String)                  # "open" | "closed"
+    free = Column(Integer)
+    status = Column(String)
     garage = relationship("ParkingGarage", back_populates="readings")
 
+
+class ParkingHistory(Base):
+    """Verlauf der Parkhaus-Belegung — neuer Eintrag nur bei Wertänderung."""
+    __tablename__ = "parking_history"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    garage_slug = Column(String, ForeignKey("parking_garages.slug"), nullable=False)
+    ts = Column(DateTime, nullable=False)   # UTC, unser Poll-Zeitpunkt
+    free = Column(Integer)
+    status = Column(String)
+
     __table_args__ = (
-        Index("ix_parking_ts", "ts"),
-        Index("uq_parking_natural", "garage_slug", "ts", unique=True),
+        Index("ix_parking_history_ts", "ts"),
+        Index("ix_parking_history_garage_ts", "garage_slug", "ts"),
     )
 
 
