@@ -6,17 +6,15 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.PI_HOST }}
-          username: ${{ secrets.PI_USER }}
-          key: ${{ secrets.PI_SSH_KEY }}
-          port: ${{ secrets.PI_PORT || 22 }}
-          script: |
-            cd ${{ secrets.PI_PATH }}
-            git pull origin main
-            docker compose up --build -d
-            docker image prune -f
+      - name: Pull latest code
+        run: |
+          cd ${{ secrets.PI_PATH }}
+          git pull origin main
+
+      - name: Rebuild and restart containers
+        run: |
+          cd ${{ secrets.PI_PATH }}
+          docker compose up --build -d
+          docker image prune -f
