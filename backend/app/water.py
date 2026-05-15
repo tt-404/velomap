@@ -13,13 +13,20 @@ from .db import WaterReading, WaterStation, get_session, init_db
 log = logging.getLogger("water")
 
 _BASE = "https://api.existenz.ch/apiv1/hydro"
+_TECDOTTIR_BASE = "https://tecdottir.metaodi.ch/measurements"
 
-# Kanton-Zürich-Stationen (gefiltert via Bounding-Box)
+# BAFU-Stationen (Kanton Zürich via existenz.ch)
 STATION_IDS = [
     "2099", "2176", "2209", "2082", "2081", "2044", "2132", "2415", "2392",
     "2014", "2125", "2126", "2288", "520",
 ]
 _LOC_PARAM = ",".join(STATION_IDS)
+
+# Stadt-Zürich-Stationen (Wasserschutzpolizei via tecdottir.metaodi.ch)
+_TECDOTTIR_STATIONS = {
+    "zh-mythenquai":    {"name": "Zürichsee Mythenquai",    "water_body": "Zürichsee", "water_type": "lake", "lat": 47.3596, "lon": 8.5386, "slug": "mythenquai"},
+    "zh-tiefenbrunnen": {"name": "Zürichsee Tiefenbrunnen", "water_body": "Zürichsee", "water_type": "lake", "lat": 47.3482, "lon": 8.5597, "slug": "tiefenbrunnen"},
+}
 
 
 def _fetch_locations() -> dict:
@@ -64,6 +71,38 @@ def _payload_to_records(payload: list[dict]) -> list[dict]:
     return list(grouped.values())
 
 
+def _ingest_tecdottir(initial: bool = False) -> int:
+    """Holt Messungen von Mythenquai + Tiefenbrunnen (Stadt Zürich)."""
+    # Stationen sicherstellen
+    with get_session() as s:
+        for sid, info in _TECDOTTIR_STATIONS.items():
+            s.merge(WaterStation(id=sid, name=info["name"], water_body=info["water_body"],
+                                 water_type=info["water_type"], lat=info["lat"], lon=info["lon"]))
+
+    records = []
+    limit = 1152 if initial else 3  # 1152 = 8 Tage à 10-Min-Intervall
+    for sid, info in _TECDOTTIR_STATIONS.items():
+        url = (f"{_TECDOTTIR_BASE}/{info['slug']}"
+               f"?limit={limit}&sort=timestamp_utc%20desc")
+        try:
+            with httpx.Client(timeout=30.0) as c:
+                r = c.get(url)
+                r.raise_for_status()
+            for row in r.json().get("result", []):
+                vals = row.get("values", {})
+                temp = vals.get("water_temperature", {}).get("value")
+                level = vals.get("water_level", {}).get("value")
+                records.append({
+                    "station_id": sid,
+                    "ts": datetime.fromisoformat(row["timestamp"].replace("Z", "+00:00")),
+                    "temperature": float(temp) if temp is not None else None,
+                    "height": float(level) if level is not None else None,
+                })
+        except Exception as e:
+            log.warning("Tecdottir %s fehlgeschlagen: %s", sid, e)
+    return _bulk_insert(records)
+
+
 def run_water_ingest(initial: bool = False) -> dict:
     """Holt Temperatur + Wasserstand für alle ZH-Stationen und schreibt in DB."""
     init_db()
@@ -91,7 +130,8 @@ def run_water_ingest(initial: bool = False) -> dict:
 
     records = _payload_to_records(payload)
     inserted = _bulk_insert(records)
-    log.info("Wasser-Ingest: %d Readings eingefügt", inserted)
+    inserted += _ingest_tecdottir(initial=initial)
+    log.info("Wasser-Ingest: %d Readings eingefügt (inkl. Tecdottir)", inserted)
     return {"status": "ok", "inserted": inserted}
 
 
