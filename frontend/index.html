@@ -435,28 +435,36 @@
              '</div>';
     }
 
+    var parkingData = {};  // aktuellste Daten pro slug
+
     function refreshParking() {
       if (!parkingOnMap) return;
       fetch(API + '/api/parking', { cache: 'no-store' })
         .then(function(r) { return r.json(); })
         .then(function(garages) {
-          parkingLayerGroup.clearLayers();
-          parkingMarkers = {};
           garages.forEach(function(g) {
             if (!g.lat || !g.lon) return;
-            var m = L.marker([g.lat, g.lon], { icon: buildParkingIcon(g.free, g.status) });
-            m.bindTooltip(g.name, { className: 'station-tooltip', direction: 'top', offset: [0, -14] });
-            m.bindPopup(buildParkingPopup(g), { maxWidth: 320, minWidth: 260, closeButton: true });
-            m.on('click', function() {
-              m.bindPopup(buildParkingPopup(g), { maxWidth: 320, minWidth: 260, closeButton: true }).openPopup();
-              fetch(API + '/api/parking/history/' + g.slug)
-                .then(function(r) { return r.json(); })
-                .then(function(history) {
-                  if (m.isPopupOpen()) m.setPopupContent(buildParkingPopup(g, history));
-                });
-            });
-            parkingLayerGroup.addLayer(m);
-            parkingMarkers[g.slug] = m;
+            parkingData[g.slug] = g;
+            if (parkingMarkers[g.slug]) {
+              // Nur Icon aktualisieren, Marker bleibt bestehen
+              parkingMarkers[g.slug].setIcon(buildParkingIcon(g.free, g.status));
+            } else {
+              // Erster Load: Marker erstellen
+              var m = L.marker([g.lat, g.lon], { icon: buildParkingIcon(g.free, g.status) });
+              m.bindTooltip(g.name, { className: 'station-tooltip', direction: 'top', offset: [0, -14] });
+              m.on('click', function() {
+                var cur = parkingData[g.slug] || g;
+                m.unbindPopup();
+                m.bindPopup(buildParkingPopup(cur), { maxWidth: 320, minWidth: 260, closeButton: true }).openPopup();
+                fetch(API + '/api/parking/history/' + g.slug)
+                  .then(function(r) { return r.json(); })
+                  .then(function(history) {
+                    if (m.isPopupOpen()) m.setPopupContent(buildParkingPopup(parkingData[g.slug] || g, history));
+                  });
+              });
+              parkingLayerGroup.addLayer(m);
+              parkingMarkers[g.slug] = m;
+            }
           });
         }).catch(function(e) { console.warn('Parking:', e); });
     }
