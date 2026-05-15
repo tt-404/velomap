@@ -92,6 +92,33 @@ class Precip(Base):
     )
 
 
+class ParkingGarage(Base):
+    """Parkhaus im Zürcher Parkleitsystem."""
+    __tablename__ = "parking_garages"
+    slug = Column(String, primary_key=True)   # pid aus PLS-URL, z.B. "accu"
+    name = Column(String, nullable=False)
+    address = Column(String)
+    lat = Column(Float)
+    lon = Column(Float)
+    readings = relationship("ParkingReading", back_populates="garage")
+
+
+class ParkingReading(Base):
+    """Aktuelle Belegung eines Parkhauses."""
+    __tablename__ = "parking_readings"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    garage_slug = Column(String, ForeignKey("parking_garages.slug"), nullable=False)
+    ts = Column(DateTime, nullable=False)   # UTC, aus dc:date
+    free = Column(Integer)                   # freie Plätze
+    status = Column(String)                  # "open" | "closed"
+    garage = relationship("ParkingGarage", back_populates="readings")
+
+    __table_args__ = (
+        Index("ix_parking_ts", "ts"),
+        Index("uq_parking_natural", "garage_slug", "ts", unique=True),
+    )
+
+
 class IngestLog(Base):
     """Protokoll der Ingestion-Läufe."""
     __tablename__ = "ingest_log"

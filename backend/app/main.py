@@ -16,6 +16,7 @@ from sqlalchemy import func, select
 
 from .db import Count, Precip, Station, get_session, init_db
 from .ingest import run_ingest
+from .parking import get_current_parking, run_parking_ingest
 from .radar import ccs4_bounds_wgs84, render_radar_png_at, run_radar_ingest
 from .scheduler import shutdown_scheduler, start_scheduler
 
@@ -36,6 +37,8 @@ async def lifespan(app: FastAPI):
         log.info("Datenbank leer – starte Initial-Import im Hintergrund")
         import threading
         threading.Thread(target=lambda: run_ingest(initial=True), daemon=True).start()
+    import threading
+    threading.Thread(target=run_parking_ingest, daemon=True).start()
     start_scheduler()
     yield
     shutdown_scheduler()
@@ -260,6 +263,19 @@ def trigger_ingest(background: BackgroundTasks, initial: bool = False):
     """Manueller Trigger für Velo-Ingest."""
     background.add_task(run_ingest, initial=initial)
     return {"status": "scheduled", "type": "velo", "initial": initial}
+
+
+@app.get("/api/parking")
+def parking():
+    """Aktuellste Belegung aller Parkhäuser im PLS Zürich."""
+    return get_current_parking()
+
+
+@app.post("/api/ingest/parking")
+def trigger_parking(background: BackgroundTasks):
+    """Manueller Trigger für Parking-Ingest."""
+    background.add_task(run_parking_ingest)
+    return {"status": "scheduled", "type": "parking"}
 
 
 @app.post("/api/ingest/radar")
