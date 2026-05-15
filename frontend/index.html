@@ -442,23 +442,34 @@
       fetch(API + '/api/parking', { cache: 'no-store' })
         .then(function(r) { return r.json(); })
         .then(function(garages) {
+          // Zeitstempel sichtbar aktualisieren
+          var tsEl = document.getElementById('parkingTs');
+          if (tsEl) tsEl.textContent = new Date().toLocaleTimeString('de-CH');
+
           garages.forEach(function(g) {
             if (!g.lat || !g.lon) return;
             parkingData[g.slug] = g;
             if (parkingMarkers[g.slug]) {
               // Nur Icon aktualisieren, Marker bleibt bestehen
-              parkingMarkers[g.slug].setIcon(buildParkingIcon(g.free, g.status));
+              var m = parkingMarkers[g.slug];
+              m.setIcon(buildParkingIcon(g.free, g.status));
+              // Offenes Popup ebenfalls aktualisieren
+              if (m.isPopupOpen()) {
+                m.setPopupContent(buildParkingPopup(g, m._history));
+              }
             } else {
               // Erster Load: Marker erstellen
               var m = L.marker([g.lat, g.lon], { icon: buildParkingIcon(g.free, g.status) });
+              m._history = undefined;
               m.bindTooltip(g.name, { className: 'station-tooltip', direction: 'top', offset: [0, -14] });
               m.on('click', function() {
                 var cur = parkingData[g.slug] || g;
                 m.unbindPopup();
-                m.bindPopup(buildParkingPopup(cur), { maxWidth: 320, minWidth: 260, closeButton: true }).openPopup();
+                m.bindPopup(buildParkingPopup(cur, m._history), { maxWidth: 320, minWidth: 260, closeButton: true }).openPopup();
                 fetch(API + '/api/parking/history/' + g.slug)
                   .then(function(r) { return r.json(); })
                   .then(function(history) {
+                    m._history = history;
                     if (m.isPopupOpen()) m.setPopupContent(buildParkingPopup(parkingData[g.slug] || g, history));
                   });
               });
@@ -732,7 +743,7 @@
           '<label>' +
             '<input type="checkbox" id="toggleParking">' +
             '<span class="parking-icon">P</span>' +
-            '<span>Parkhäuser</span>' +
+            '<span>Parkhäuser <span id="parkingTs" style="font-size:9px;color:var(--muted);font-weight:400"></span></span>' +
           '</label>' +
           '<label>' +
             '<input type="checkbox" id="toggleMivNational">' +
