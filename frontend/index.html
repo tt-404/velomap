@@ -241,7 +241,7 @@
 
   function buildPopupHtml(station, value, precip, ts) {
     var col = colorFor(value);
-    var precipHtml = precip > 0 ? '<div class="precip">☔ ' + precip.toFixed(1) + ' mm/h</div>' : '';
+    var precipHtml = precip >= 0.1 ? '<div class="precip">☔ ' + precip.toFixed(1) + ' mm/h</div>' : '';
     var streetName = station.street_name || station.name || ('Station ' + station.id);
     var officialName = station.name && station.name !== streetName ? station.name : '';
     return '<div class="popup-header">' +

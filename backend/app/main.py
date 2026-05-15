@@ -81,10 +81,11 @@ def list_stations(include_inactive: bool = Query(False)):
         if include_inactive:
             rows = s.execute(select(Station)).scalars().all()
         else:
-            # Nur Stationen, die jemals Velo-Verkehr gemessen haben.
-            # SUM(velo_in + velo_out) > 0 wäre auch möglich, aber EXISTS ist schneller.
+            # Nur Stationen mit Velo-Verkehr in den letzten 60 Tagen (filtert stillgelegte aus).
+            cutoff = datetime.now(timezone.utc) - timedelta(days=60)
             active_ids_subq = (
                 select(Count.station_id)
+                .where(Count.ts >= cutoff)
                 .where((Count.velo_in > 0) | (Count.velo_out > 0))
                 .distinct()
                 .scalar_subquery()
