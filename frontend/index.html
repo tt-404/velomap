@@ -445,6 +445,15 @@
     var parkingSnapCache = new Map();
     var parkingSnapDebounce = null;
 
+    function _pickParkingData(m, liveGarage) {
+      if (_parkingIsHistorical() && m._snapshot !== undefined) {
+        // _snapshot=null → kein Wert für diesen Zeitpunkt → Platzhalter zeigen
+        return m._snapshot || { name: liveGarage.name, address: liveGarage.address,
+                                free: null, status: 'closed', ts: null };
+      }
+      return parkingData[liveGarage.slug] || liveGarage;
+    }
+
     function _parkingIsHistorical() {
       // Historisch = Slider nicht am neuesten (rechtesten) Slot
       return timeSlots.length > 0 && currentIdx < timeSlots.length - 1;
@@ -472,17 +481,14 @@
               m._snapshot = undefined;
               m.bindTooltip(g.name, { className: 'station-tooltip', direction: 'top', offset: [0, -14] });
               m.on('click', function() {
-                var cur = (_parkingIsHistorical() && m._snapshot) || parkingData[g.slug] || g;
+                var cur = _pickParkingData(m, g);
                 m.unbindPopup();
                 m.bindPopup(buildParkingPopup(cur, m._history), { maxWidth: 320, minWidth: 260, closeButton: true }).openPopup();
                 fetch(API + '/api/parking/history/' + g.slug)
                   .then(function(r) { return r.json(); })
                   .then(function(history) {
                     m._history = history;
-                    if (m.isPopupOpen()) {
-                      var snap = (_parkingIsHistorical() && m._snapshot) || parkingData[g.slug] || g;
-                      m.setPopupContent(buildParkingPopup(snap, history));
-                    }
+                    if (m.isPopupOpen()) m.setPopupContent(buildParkingPopup(_pickParkingData(m, g), history));
                   });
               });
               parkingLayerGroup.addLayer(m);
@@ -521,18 +527,17 @@
         seen[g.slug] = true;
         if (parkingMarkers[g.slug]) {
           parkingMarkers[g.slug].setIcon(buildParkingIcon(g.free, g.status));
-          parkingMarkers[g.slug]._snapshot = g;  // historischen Wert für Popup merken
+          parkingMarkers[g.slug]._snapshot = g;
         }
       });
-      // Garagen ohne Snapshot-Daten ausgrauen (nur wenn Snapshot nicht leer)
-      if (rows.length > 0) {
-        Object.keys(parkingMarkers).forEach(function(slug) {
-          if (!seen[slug]) {
-            parkingMarkers[slug].setIcon(buildParkingIcon(null, 'closed'));
-            parkingMarkers[slug]._snapshot = null;
-          }
-        });
-      }
+      // Immer alle nicht-erfassten Garagen ausgrauen – im historischen Modus bedeutet
+      // fehlen im Snapshot "keine Daten", nicht "Fehler"
+      Object.keys(parkingMarkers).forEach(function(slug) {
+        if (!seen[slug]) {
+          parkingMarkers[slug].setIcon(buildParkingIcon(null, 'closed'));
+          parkingMarkers[slug]._snapshot = null;  // null = explizit kein Wert
+        }
+      });
     }
 
     // === MIV-Layer (National / Kantonal / Kommunal) ===
