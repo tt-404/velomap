@@ -466,8 +466,6 @@
       fetch(API + '/api/parking', { cache: 'no-store' })
         .then(function(r) { return r.json(); })
         .then(function(garages) {
-          var tsEl = document.getElementById('parkingTs');
-          if (tsEl) tsEl.textContent = new Date().toLocaleTimeString('de-CH');
           garages.forEach(function(g) {
             if (!g.lat || !g.lon) return;
             parkingData[g.slug] = g;
@@ -815,7 +813,7 @@
           '<label>' +
             '<input type="checkbox" id="toggleParking">' +
             '<span class="parking-icon">P</span>' +
-            '<span>Parkhäuser <span id="parkingTs" style="font-size:9px;color:var(--muted);font-weight:400"></span></span>' +
+            '<span>Parkhäuser</span>' +
           '</label>' +
           '<div class="group-header">MIV</div>' +
           '<label class="sub">' +
