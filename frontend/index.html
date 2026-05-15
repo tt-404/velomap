@@ -458,20 +458,21 @@
             if (parkingMarkers[g.slug]) {
               var m = parkingMarkers[g.slug];
               m.setIcon(buildParkingIcon(g.free, g.status));
+              m._snapshot = null;  // Live-Update: keinen historischen Wert mehr cachen
               if (m.isPopupOpen()) m.setPopupContent(buildParkingPopup(g, m._history));
             } else {
               var m = L.marker([g.lat, g.lon], { icon: buildParkingIcon(g.free, g.status) });
               m._history = undefined;
               m.bindTooltip(g.name, { className: 'station-tooltip', direction: 'top', offset: [0, -14] });
               m.on('click', function() {
-                var cur = parkingData[g.slug] || g;
+                var cur = m._snapshot || parkingData[g.slug] || g;
                 m.unbindPopup();
                 m.bindPopup(buildParkingPopup(cur, m._history), { maxWidth: 320, minWidth: 260, closeButton: true }).openPopup();
                 fetch(API + '/api/parking/history/' + g.slug)
                   .then(function(r) { return r.json(); })
                   .then(function(history) {
                     m._history = history;
-                    if (m.isPopupOpen()) m.setPopupContent(buildParkingPopup(parkingData[g.slug] || g, history));
+                    if (m.isPopupOpen()) m.setPopupContent(buildParkingPopup(m._snapshot || parkingData[g.slug] || g, history));
                   });
               });
               parkingLayerGroup.addLayer(m);
@@ -511,12 +512,16 @@
         seen[g.slug] = true;
         if (parkingMarkers[g.slug]) {
           parkingMarkers[g.slug].setIcon(buildParkingIcon(g.free, g.status));
+          parkingMarkers[g.slug]._snapshot = g;  // historischen Wert für Popup merken
         }
       });
       // Garagen ohne Snapshot-Daten ausgrauen (nur wenn Snapshot nicht leer)
       if (rows.length > 0) {
         Object.keys(parkingMarkers).forEach(function(slug) {
-          if (!seen[slug]) parkingMarkers[slug].setIcon(buildParkingIcon(null, 'closed'));
+          if (!seen[slug]) {
+            parkingMarkers[slug].setIcon(buildParkingIcon(null, 'closed'));
+            parkingMarkers[slug]._snapshot = null;
+          }
         });
       }
     }
