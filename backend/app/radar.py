@@ -109,10 +109,13 @@ def find_rzc_for_time(ts: datetime) -> str | None:
     """Findet das RZC-Asset am nächsten zum Zeitpunkt (max. 30 Min Abstand)."""
     index = build_rzc_time_index()
     if not index:
+        log.warning("RZC-Zeitindex leer – kein Asset gefunden")
         return None
     ts_utc = ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts
     closest = min(index.keys(), key=lambda t: abs((t - ts_utc).total_seconds()))
-    if abs((closest - ts_utc).total_seconds()) > 1800:
+    diff = abs((closest - ts_utc).total_seconds())
+    if diff > 1800:
+        log.warning("Kein RZC-Asset innerhalb 30min von %s (nächstes: %s, diff=%ds)", ts_utc, closest, diff)
         return None
     return index[closest]
 
@@ -222,7 +225,8 @@ def parse_filename_timestamp(href: str) -> datetime | None:
               yy=25, jjj=318 (Tag 318 von 2025), HHMM=1430, Q=0
     """
     name = href.rsplit("/", 1)[-1]
-    m = re.match(r"^[A-Za-z]{3}(\d{2})(\d{3})(\d{2})(\d{2})\d", name)
+    # CPC: 10 Ziffern (yy+jjj+HH+MM+trailing), RZC/TZC: 9 Ziffern (yy+jjj+HH+MM)
+    m = re.match(r"^[A-Za-z]{3}(\d{2})(\d{3})(\d{2})(\d{2})\d?", name)
     if not m:
         return None
     yy, jjj, hh, mm = m.groups()
